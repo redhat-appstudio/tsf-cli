@@ -1,0 +1,14 @@
+/__debug*
+/.gemini
+/.vscode
+/*.dll
+/*.dylib
+/*.exe
+/*.exe~
+/*.out
+/*.so
+/*.test
+/bin
+/hack/config/
+/installer/*.tar
+/tmp
