@@ -1,0 +1,41 @@
+{{- $ghSecretObj := (lookup "v1" "Secret" .Values.konflux.tsf.namespace "tsf-github-integration") | default dict -}}
+{{- $secretData := (get $ghSecretObj "data") | default dict -}}
+{{- $applicationURL := "" -}}
+{{- if $secretData }}
+  {{- $applicationURL = (get $secretData "htmlURL") | b64dec | toString -}}
+{{- end }}
+
+{{- /* Lookup Trusted Artifact Signer integration secret to get URLs */ -}}
+{{- $tasSecretObj := (lookup "v1" "Secret" .Values.konflux.tsf.namespace "tsf-tas-integration") | default dict -}}
+{{- $secretData := required (printf "Secret 'tsf-tas-integration' not found in namespace '%s'" .Values.konflux.tsf.namespace) (get $tasSecretObj "data") | default dict -}}
+{{- $fulcioInternalUrl := required (printf "fulcio_service_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "fulcio_service_url") | b64dec | toString -}}
+{{- $fulcioExternalUrl := required (printf "fulcio_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "fulcio_url") | b64dec | toString -}}
+{{- $rekorInternalUrl := required (printf "rekor_service_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "rekor_service_url") | b64dec | toString -}}
+{{- $rekorExternalUrl := required (printf "rekor_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "rekor_url") | b64dec | toString -}}
+{{- $tufInternalUrl := required (printf "tuf_service_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "tuf_service_url") | b64dec | toString -}}
+{{- $tufExternalUrl := required (printf "tuf_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "tuf_url") | b64dec | toString -}}
+
+---
+apiVersion: konflux.konflux-ci.dev/v1alpha1
+kind: Konflux
+metadata:
+  name: konflux
+  namespace: {{ .Values.konflux.namespace }}
+spec:
+  imageController:
+    enabled: true
+  info:
+    spec:
+      clusterConfig:
+        data:
+          defaultOIDCIssuer: https://kubernetes.default.svc
+          fulcioInternalUrl: {{ $fulcioInternalUrl | quote }}
+          fulcioExternalUrl: {{ $fulcioExternalUrl | quote }}
+          rekorInternalUrl: {{ $rekorInternalUrl | quote }}
+          rekorExternalUrl: {{ $rekorExternalUrl | quote }}
+          tufInternalUrl: {{ $tufInternalUrl | quote }}
+          tufExternalUrl: {{ $tufExternalUrl | quote }}
+      publicInfo:
+        integrations:
+          github:
+            application_url: {{ $applicationURL | quote }}

@@ -37,7 +37,7 @@ Example:
 }
 
 parse_args() {
-    NAMESPACE="${NAMESPACE:-tssc}"
+    NAMESPACE="${NAMESPACE:-tsf}"
     while [[ $# -gt 0 ]]; do
         case "$1" in
         generate|login|store)
@@ -86,9 +86,9 @@ assert_variables() {
     # ArgoCD password to use for login.
     declare -r ARGOCD_PASSWORD="${ARGOCD_PASSWORD:-}"
     # Environment file to store the ArgoCD credentials.
-    declare -r ARGOCD_ENV_FILE="${ARGOCD_ENV_FILE:-/tssc/argocd/env}"
+    declare -r ARGOCD_ENV_FILE="${ARGOCD_ENV_FILE:-/tsf/argocd/env}"
     # Target secret name, to be created with ArgoCD credentials.
-    declare -r SECRET_NAME="${SECRET_NAME:-tssc-argocd-integration}"
+    declare -r SECRET_NAME="${SECRET_NAME:-tsf-argocd-integration}"
     # Secret's namespace.
     declare -r NAMESPACE="${NAMESPACE:-}"
 
