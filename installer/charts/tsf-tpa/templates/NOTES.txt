@@ -3,6 +3,3 @@
 Trusted Profile Analyzer (TPA):
   - UI: {{ printf "https://server%s" $trustification.appDomain }}
     Keycloak URL:   {{ $trustification.oidc.issuerUrl }}
-    Bombastic API:  {{ printf "sbom%s" $trustification.appDomain }}
-    Documentation:  {{ printf "docs%s" $trustification.appDomain }}
-    SPOG API:       {{ printf "api%s" $trustification.appDomain }}
