@@ -12,7 +12,7 @@
 2. Start a container with `podman run -it --rm --env-file tsf.env --entrypoint bash -p 8228:8228 --pull always quay.io/roming22-org/tsf:latest --login`.
 3. Log in to the cluster with `oc login "$OCP__API_ENDPOINT" --username "$OCP__USERNAME" --password "$OCP__PASSWORD"`
 4. Create the TSF config on the cluster with `tsf config --create`.
-5. Check if the Red Hat Cert-Manager operator is already installed in the cluster. If it is, edit the `tsf-config` ConfigMap in the `tssc` namespace to set `manageSubscription: false` for the Cert-Manager product.
+5. Check if the Red Hat Cert-Manager operator is already installed in the cluster. If it is, edit the `tsf-config` ConfigMap in the `tsf` namespace to set `manageSubscription: false` for the Cert-Manager product.
 6. Create the github app integration with `tsf integration github --create --org "$GITHUB__ORG" "tsf-$(date +%m%d-%H%M)"`. Open the link to create the app, follow the instructions, and install the application to your GitHub organization.
 7. Create the quay integration with `tsf integration quay --organization="$QUAY__ORG" --token="$QUAY__API_TOKEN" --url="$QUAY__URL"`. If you need information on how to generate the token, look further in this document.
 8. Deploy all the services with `tsf deploy`.
@@ -73,7 +73,7 @@ The subscription has already been installed by a third party. Helm does not want
 
 #### Workaround
 
-* Edit the `tsf-config` ConfigMap in the `tssc` namespace to set `manageSubscription: false` for the Cert-Manager product.
+* Edit the `tsf-config` ConfigMap in the `tsf` namespace to set `manageSubscription: false` for the Cert-Manager product.
 
 ## Konflux Troubleshooting
 
