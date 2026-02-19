@@ -15,6 +15,15 @@
 {{- $tufInternalUrl := required (printf "tuf_service_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "tuf_service_url") | b64dec | toString -}}
 {{- $tufExternalUrl := required (printf "tuf_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "tuf_url") | b64dec | toString -}}
 
+{{- /* Enable imageController only when tsf-quay-integration url is https://quay.io */ -}}
+{{- $quaySecretObj := (lookup "v1" "Secret" .Values.konflux.tsf.namespace "tsf-quay-integration") | default dict -}}
+{{- $quaySecretData := (get $quaySecretObj "data") | default dict -}}
+{{- $quayUrl := "" -}}
+{{- if and $quaySecretData (get $quaySecretData "url") }}
+  {{- $quayUrl = (get $quaySecretData "url") | b64dec | toString -}}
+{{- end }}
+{{- $imageControllerEnabled := (eq $quayUrl "https://quay.io") -}}
+
 ---
 apiVersion: konflux.konflux-ci.dev/v1alpha1
 kind: Konflux
@@ -23,7 +32,7 @@ metadata:
   namespace: {{ .Values.konflux.namespace }}
 spec:
   imageController:
-    enabled: true
+    enabled: {{ $imageControllerEnabled }}
   info:
     spec:
       clusterConfig:
