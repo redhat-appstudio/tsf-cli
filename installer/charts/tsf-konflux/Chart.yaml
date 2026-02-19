@@ -7,4 +7,4 @@ version: "1.6.0"
 appVersion: "0.0"
 annotations:
   helmet.redhat-appstudio.github.com/product-name: Konflux
-  helmet.redhat-appstudio.github.com/depends-on: tsf-openshift, tsf-subscriptions, tsf-pipelines, tsf-tas
+  helmet.redhat-appstudio.github.com/depends-on: tsf-openshift, tsf-subscriptions, tsf-pipelines, tsf-tas, tsf-tpa
