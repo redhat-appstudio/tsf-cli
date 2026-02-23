@@ -17,8 +17,8 @@
 #
 # TAS OIDC credentials
 #
-{{- 
-  $oidcSecretObjTAS := 
+{{-
+  $oidcSecretObjTAS :=
     (lookup "v1" "Secret" .Release.Namespace $tas.oidcClientsSecretName) |
     default dict
 }}
@@ -27,8 +27,8 @@
 #
 # TPA OIDC credentials
 #
-{{- 
-  $oidcSecretObjTPA := 
+{{-
+  $oidcSecretObjTPA :=
     (lookup "v1" "Secret" .Release.Namespace $tpa.oidcClientsSecretName) |
     default dict
 }}
@@ -111,6 +111,10 @@ stringData:
   bombastic_api_url: {{
     required ".Values.trustedProfileAnalyzerRealm.integrationSecret.bombasticAPI is required"
       $tpa.integrationSecret.bombasticAPI
+  }}
+  bombastic_api_service_url: {{
+    required ".Values.trustedProfileAnalyzerRealm.integrationSecret.bombasticAPIService is required"
+      $tpa.integrationSecret.bombasticAPIService
   }}
   oidc_issuer_url: {{
     required ".Values.trustedProfileAnalyzerRealm.oidcIssuerURL is required"

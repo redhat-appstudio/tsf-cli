@@ -3,13 +3,10 @@
 #
 
 FROM registry.redhat.io/openshift4/ose-tools-rhel9:v4.20.0-202602040619.p2.g040daf8.assembly.stream.el9 AS ose-tools
-FROM registry.access.redhat.com/ubi10/go-toolset:1.25.5-1770726582 AS builder
+FROM registry.access.redhat.com/ubi10/go-toolset:1.25.7-1771345385 AS builder
 
 ARG COMMIT_ID
 ARG VERSION_ID
-
-# Allow Go to download the required toolchain version
-ENV GOTOOLCHAIN=auto
 
 USER root
 WORKDIR /workdir/tsf

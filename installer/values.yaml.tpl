@@ -159,6 +159,10 @@ iam:
             $tpa.Namespace
             $ingressDomain
         }}
+        bombasticAPIService: {{
+          printf "https://server.%s.svc.cluster.local"
+            $tpa.Namespace
+        }}
         namespace: {{ .Installer.Namespace }}
 #
 # tsf-konflux

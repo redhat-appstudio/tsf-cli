@@ -15,10 +15,19 @@
 {{- $tufInternalUrl := required (printf "tuf_service_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "tuf_service_url") | b64dec | toString -}}
 {{- $tufExternalUrl := required (printf "tuf_url not found in secret 'tsf-tas-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "tuf_url") | b64dec | toString -}}
 {{- /* Lookup Trusted Profile Analyzer integration secret to get URLs */ -}}
-{{- $tpaSecretObj := (lookup "v1" "Secret" .Values.konflux.tsf.namespace "tsf-tpa-integration") | default dict -}}
-{{- $secretData := required (printf "Secret 'tsf-tpa-integration' not found in namespace '%s'" .Values.konflux.tsf.namespace) (get $tpaSecretObj "data") | default dict -}}
-{{- $trustifyServerInternalUrl := required (printf "trustify_server_internal_url not found in secret 'tsf-tpa-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "trustify_server_internal_url") | b64dec | toString -}}
-{{- $trustifyServerExternalUrl := required (printf "trustify_server_external_url not found in secret 'tsf-tpa-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "trustify_server_external_url") | b64dec | toString -}}
+{{- $tpaSecretObj := (lookup "v1" "Secret" .Values.konflux.tsf.namespace "tsf-trustification-integration") | default dict -}}
+{{- $secretData := required (printf "Secret 'tsf-trustification-integration' not found in namespace '%s'" .Values.konflux.tsf.namespace) (get $tpaSecretObj "data") | default dict -}}
+{{- $trustifyServiceUrl := required (printf "bombastic_api_service_url not found in secret 'tsf-trustification-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "bombastic_api_service_url") | b64dec | toString -}}
+{{- $trustifyUrl := required (printf "bombastic_api_url not found in secret 'tsf-trustification-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "bombastic_api_url") | b64dec | toString -}}
+
+{{- /* Enable imageController only when tsf-quay-integration url is https://quay.io */ -}}
+{{- $quaySecretObj := (lookup "v1" "Secret" .Values.konflux.tsf.namespace "tsf-quay-integration") | default dict -}}
+{{- $quaySecretData := (get $quaySecretObj "data") | default dict -}}
+{{- $quayUrl := "" -}}
+{{- if and $quaySecretData (get $quaySecretData "url") }}
+  {{- $quayUrl = (get $quaySecretData "url") | b64dec | toString -}}
+{{- end }}
+{{- $imageControllerEnabled := (eq $quayUrl "https://quay.io") -}}
 
 ---
 apiVersion: konflux.konflux-ci.dev/v1alpha1
@@ -28,7 +37,7 @@ metadata:
   namespace: {{ .Values.konflux.namespace }}
 spec:
   imageController:
-    enabled: true
+    enabled: {{ $imageControllerEnabled }}
   info:
     spec:
       clusterConfig:
@@ -41,12 +50,12 @@ spec:
           rekorExternalUrl: {{ $rekorExternalUrl | quote }}
           tufInternalUrl: {{ $tufInternalUrl | quote }}
           tufExternalUrl: {{ $tufExternalUrl | quote }}
-          trustifyServerInternalUrl: {{ $trustifyServerInternalUrl | quote }}
-          trustifyServerExternalUrl: {{ $trustifyServerExternalUrl | quote }}
+          trustifyServerInternalUrl: {{ $trustifyServiceUrl | quote }}
+          trustifyServerExternalUrl: {{ $trustifyUrl | quote }}
       publicInfo:
         integrations:
           github:
             application_url: {{ $applicationURL | quote }}
           sbom_server:
-            url: "{{ $trustifyServerExternalUrl }}/sbom/content/<PLACEHOLDER>"
-            sbom_sha: "{{ $trustifyServerExternalUrl }}/sboms/<PLACEHOLDER>"
+            url: "{{ $trustifyUrl }}/sbom/content/<PLACEHOLDER>"
+            sbom_sha: "{{ $trustifyUrl }}/sboms/<PLACEHOLDER>"
