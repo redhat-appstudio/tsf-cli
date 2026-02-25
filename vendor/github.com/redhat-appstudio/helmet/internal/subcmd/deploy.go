@@ -36,28 +36,6 @@ type Deploy struct {
 
 var _ api.SubCommand = (*Deploy)(nil)
 
-const deployDesc = `
-Deploys the TSSC platform components.
-
-It should only be used to for experimental deployments. Production
-deployments are not supported.
-
-The installer looks at the configuration to identify the products to be
-installed, and the dependencies to be resolved.
-
-The deployment configuration file describes the sequence of Helm charts to be
-applied, on the attribute 'tssc.dependencies[]'.
-
-The platform configuration is rendered from the values template file
-(--values-template), this configuration payload is given to all Helm charts.
-
-The installer resources are embedded in the executable, these resources are
-employed by default.
-
-A single chart can be deployed by specifying its path. E.g.:
-	tssc deploy charts/tssc-openshift
-`
-
 // Cmd exposes the cobra instance.
 func (d *Deploy) Cmd() *cobra.Command {
 	return d.cmd
@@ -196,10 +174,32 @@ func NewDeploy(
 	manager *integrations.Manager,
 	installerTarball []byte,
 ) api.SubCommand {
+	deployDesc := fmt.Sprintf(`
+Deploys the %s platform components.
+
+It should only be used to for experimental deployments. Production
+deployments are not supported.
+
+The installer looks at the configuration to identify the products to be
+installed, and the dependencies to be resolved.
+
+The deployment configuration file describes the sequence of Helm charts to be
+applied, on the attribute '%s.dependencies[]'.
+
+The platform configuration is rendered from the values template file
+(--values-template), this configuration payload is given to all Helm charts.
+
+The installer resources are embedded in the executable, these resources are
+employed by default.
+
+A single chart can be deployed by specifying its path. E.g.:
+	%s deploy charts/%s-openshift
+`, appCtx.Name, appCtx.IdentifierName(), appCtx.Name, appCtx.IdentifierName())
+
 	d := &Deploy{
 		cmd: &cobra.Command{
 			Use:          "deploy [chart]",
-			Short:        "Rollout TSSC platform components",
+			Short:        fmt.Sprintf("Rollout %s platform components", appCtx.Name),
 			Long:         deployDesc,
 			SilenceUsage: true,
 		},
