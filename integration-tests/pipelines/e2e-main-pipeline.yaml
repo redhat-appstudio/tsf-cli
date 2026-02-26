@@ -1,0 +1,77 @@
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: e2e-main-pipeline
+spec:
+  pipelineSpec:
+    params:
+      - name: SNAPSHOT
+        description: "The JSON string representing the snapshot of the application under test."
+        default: '{"components": [{"name":"test-app", "containerImage": "quay.io/example/repo:latest"}]}'
+        type: string
+      - name: konflux-test-infra-secret
+        description: The name of secret where testing infrastructures credentials are stored.
+        type: string
+      - name: cloud-credential-key
+        description: The key secret from konflux-test-infra-secret where all AWS ROSA configurations are stored.
+        type: string
+      - name: ocp-instance-type
+        description: 'The type of machine to use for the cluster nodes.'
+        default: "m5.2xlarge"
+        type: string
+      - name: ocp-replicas
+        description: 'The number of replicas for the cluster nodes.'
+        default: "3"
+        type: string
+      - name: ocp-versions
+        description: "List of OCP versions used to fan out nested tsf-cli-e2e runs."
+        type: array
+        default:
+          - "4.19"
+          - "4.20"
+    tasks:
+      - name: test-metadata
+        taskRef:
+          resolver: git
+          params:
+            - name: url
+              value: https://github.com/konflux-ci/tekton-integration-catalog.git
+            - name: revision
+              value: main
+            - name: pathInRepo
+              value: tasks/test-metadata/0.4/test-metadata.yaml
+        params:
+          - name: SNAPSHOT
+            value: $(params.SNAPSHOT)
+      - name: start-nested-pipelines
+        displayName: "Start tsf-cli-e2e Pipeline ($(params.ocp-version))"
+        timeout: "2h30m"
+        runAfter:
+          - test-metadata
+        matrix:
+          params:
+            - name: ocp-version
+              value: $(params.ocp-versions[*])
+        taskRef:
+          resolver: git
+          params:
+            - name: url
+              value: https://github.com/redhat-appstudio/tsf-cli.git
+            - name: revision
+              value: main
+            - name: pathInRepo
+              value: integration-tests/tasks/start-pipeline.yaml
+        params:
+          - name: job-spec
+            value: $(tasks.test-metadata.results.job-spec)
+          - name: konflux-test-infra-secret
+            value: $(params.konflux-test-infra-secret)
+          - name: cloud-credential-key
+            value: $(params.cloud-credential-key)
+          - name: ocp-instance-type
+            value: $(params.ocp-instance-type)
+          - name: ocp-replicas
+            value: $(params.ocp-replicas)
+          - name: main-pipeline-run-name
+            value: $(context.pipelineRun.name)

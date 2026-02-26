@@ -1,0 +1,187 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: start-pipeline
+  annotations:
+    tekton.dev/displayName: "Start Single E2E Pipeline"
+    tekton.dev/categories: "Pipeline"
+    tekton.dev/tags: "pipeline,start,tsf-cli,e2e"
+spec:
+  description: >-
+    Starts exactly one tsf-cli-e2e pipeline run for a single OCP version.
+  params:
+    - name: ocp-version
+      description: "Single OCP version for this matrix slot"
+      type: string
+    - name: job-spec
+      description: "Job specification metadata"
+      type: string
+    - name: konflux-test-infra-secret
+      description: "The name of secret where testing infrastructures credentials are stored"
+      type: string
+    - name: cloud-credential-key
+      description: "The key secret from konflux-test-infra-secret where all AWS ROSA configurations are stored"
+      type: string
+    - name: ocp-instance-type
+      description: "The type of machine to use for the cluster nodes"
+      type: string
+      default: "m5.2xlarge"
+    - name: ocp-replicas
+      description: "The number of replicas for the cluster nodes"
+      type: string
+      default: "3"
+    - name: main-pipeline-run-name
+      description: "Main pipeline run name for labeling"
+      type: string
+  results:
+    - name: pipeline-run
+      type: string
+      description: "Started pipeline run name"
+  volumes:
+    - name: step-shared
+      emptyDir: {}
+  steps:
+    - name: extract-pipeline-params
+      image: quay.io/openshift-pipeline/ci
+      volumeMounts:
+        - name: step-shared
+          mountPath: /shared
+      env:
+        - name: JOB_SPEC
+          value: $(params.job-spec)
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Extract repo metadata from job-spec once for handoff.
+        repo_name="$(jq -r '.git.repo // empty' <<< "${JOB_SPEC}")"
+        repo_url="$(jq -r '.git.url // empty' <<< "${JOB_SPEC}")"
+        revision="$(jq -r '.git.revision // empty' <<< "${JOB_SPEC}")"
+        repo_org="$(jq -r '.git.source_repo_org // empty' <<< "${JOB_SPEC}")"
+
+        printf "%s" "${repo_url}" > /shared/tsf-cli-repo-url
+        printf "%s" "${revision}" > /shared/tsf-cli-revision
+        printf "%s" "${repo_org}" > /shared/tsf-cli-repo-org
+        printf "%s" "${repo_name}" > /shared/tsf-cli-repo-name
+
+    - name: start-single
+      image: quay.io/openshift-pipeline/ci
+      volumeMounts:
+        - name: step-shared
+          mountPath: /shared
+      env:
+        - name: OCP_VERSION
+          value: $(params.ocp-version)
+        - name: JOB_SPEC
+          value: $(params.job-spec)
+        - name: MAIN_PIPELINE_RUN_NAME
+          value: $(params.main-pipeline-run-name)
+        - name: KONFLUX_TEST_INFRA_SECRET
+          value: $(params.konflux-test-infra-secret)
+        - name: CLOUD_CREDENTIAL_KEY
+          value: $(params.cloud-credential-key)
+        - name: OCP_INSTANCE_TYPE
+          value: $(params.ocp-instance-type)
+        - name: OCP_REPLICAS
+          value: $(params.ocp-replicas)
+        - name: KONFLUX_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: KONFLUX_APPLICATION_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['appstudio.openshift.io/application']
+        - name: KONFLUX_COMPONENT_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['appstudio.openshift.io/component']
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        TSF_CLI_REPO_URL="$(cat /shared/tsf-cli-repo-url)"
+        TSF_CLI_REVISION="$(cat /shared/tsf-cli-revision)"
+        TSF_CLI_REPO_ORG="$(cat /shared/tsf-cli-repo-org)"
+        TSF_CLI_REPO_NAME="$(cat /shared/tsf-cli-repo-name)"
+
+        pipeline_url="https://raw.githubusercontent.com/${TSF_CLI_REPO_ORG}/${TSF_CLI_REPO_NAME}/${TSF_CLI_REVISION}/integration-tests/pipelines/tsf-cli-e2e.yaml"
+        echo "Starting tsf-cli-e2e pipeline from ${pipeline_url} for OCP version ${OCP_VERSION}"
+
+        # Derive optional metadata labels from test-metadata job-spec payload.
+        URL_ORG="$(jq -r '.git.org // empty' <<< "${JOB_SPEC}")"
+        URL_REPOSITORY="$(jq -r '.git.repo // empty' <<< "${JOB_SPEC}")"
+        GIT_REVISION="$(jq -r '.git.commit_sha // empty' <<< "${JOB_SPEC}")"
+        PR_NUMBER="$(jq -r '.git.pull_request_number // empty' <<< "${JOB_SPEC}")"
+        EVENT_TYPE="$(jq -r '.event_type // .git.event_type // empty' <<< "${JOB_SPEC}")"
+        TSF_CLI_IMAGE="$(jq -r '.container_image // empty' <<< "${JOB_SPEC}")"
+
+        # Required child params and static pipeline labels.
+        tkn_params=(
+          "--param" "ocp-version=${OCP_VERSION}"
+          "--param" "job-spec=${JOB_SPEC}"
+          "--param" "konflux-test-infra-secret=${KONFLUX_TEST_INFRA_SECRET}"
+          "--param" "cloud-credential-key=${CLOUD_CREDENTIAL_KEY}"
+          "--param" "machine-type=${OCP_INSTANCE_TYPE}"
+          "--param" "replicas=${OCP_REPLICAS}"
+          "--param" "tsf-cli-repo-url=${TSF_CLI_REPO_URL}"
+          "--param" "tsf-cli-revision=${TSF_CLI_REVISION}"
+          # "--param" "tsf-test-repo-url=${TSF_TEST_REPO_URL}"
+          # "--param" "tsf-test-revision=${TSF_TEST_REVISION}"
+          "--use-param-defaults"
+          "--labels" "appstudio.openshift.io/component=${KONFLUX_COMPONENT_NAME}"
+          "--labels" "appstudio.openshift.io/application=${KONFLUX_APPLICATION_NAME}"
+          "--labels" "pipelines.appstudio.openshift.io/type=${MAIN_PIPELINE_RUN_NAME}"
+          "--labels" "test.appstudio.openshift.io/scenario=tsf-cli-e2e-tests"
+          "--labels" "custom.appstudio.openshift.io/main-pipeline-run=${MAIN_PIPELINE_RUN_NAME}"
+          "--labels" "pac.test.appstudio.openshift.io/url-org=${URL_ORG}"
+          "--labels" "pac.test.appstudio.openshift.io/url-repository=${URL_REPOSITORY}"
+          "--labels" "pac.test.appstudio.openshift.io/git-revision=${GIT_REVISION}"
+          "--labels" "pac.test.appstudio.openshift.io/pull-request=${PR_NUMBER}"
+          "--labels" "pac.test.appstudio.openshift.io/event-type=${EVENT_TYPE}"
+          "--prefix-name" "tsf-e2e-${OCP_VERSION}"
+          "-o" "name"
+          "--serviceaccount" "konflux-integration-runner"
+          "--pipeline-timeout" "2h0m"
+        )
+
+        # Keep child pipeline default image unless job-spec provides one.
+        if [[ -n "${TSF_CLI_IMAGE}" ]]; then
+          tkn_params+=("--param" "tsf-cli-image=${TSF_CLI_IMAGE}")
+        fi
+
+        echo "tkn_params: \n${tkn_params[@]}"
+
+        pipeline_run="$(tkn pipeline start -f "${pipeline_url}" "${tkn_params[@]}")"
+        pipeline_run_name="${pipeline_run##*/}"
+        printf "%s" "${pipeline_run_name}" > "$(results.pipeline-run.path)"
+
+        # Wait for PipelineRun resource to appear.
+        PIPELINE_RUN_NAME="${pipeline_run_name}" KONFLUX_NAMESPACE="${KONFLUX_NAMESPACE}" timeout --foreground 300s bash -c '
+          until oc get "pipelinerun/${PIPELINE_RUN_NAME}" -n "${KONFLUX_NAMESPACE}" >/dev/null 2>&1; do
+            echo "Waiting for PipelineRun ${PIPELINE_RUN_NAME} to be created..."
+            sleep 2
+          done
+        '
+
+        # Wait for completion: Succeeded=True (pass) or Succeeded=False (fail).
+        PIPELINE_RUN_NAME="${pipeline_run_name}" KONFLUX_NAMESPACE="${KONFLUX_NAMESPACE}" timeout --foreground 2h bash -c '
+          while true; do
+            status=$(oc get "pipelinerun/${PIPELINE_RUN_NAME}" -n "${KONFLUX_NAMESPACE}" -o jsonpath="{.status.conditions[?(@.type==\"Succeeded\")].status}" 2>/dev/null || true)
+            case "${status}" in
+              True)
+                echo "Pipeline run ${PIPELINE_RUN_NAME} completed successfully."
+                exit 0
+                ;;
+              False)
+                echo "Pipeline run ${PIPELINE_RUN_NAME} failed."
+                exit 1
+                ;;
+              *)
+                echo "Pipeline run ${PIPELINE_RUN_NAME} still running..."
+                sleep 15
+                ;;
+            esac
+          done
+        '
