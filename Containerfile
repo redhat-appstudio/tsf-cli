@@ -75,8 +75,8 @@ COPY --from=builder /workdir/tsf/installer/charts ./charts
 COPY --from=builder /workdir/tsf/installer/config.yaml ./
 COPY --from=builder /workdir/tsf/bin/tsf /usr/local/bin/tsf
 
-ADD https://raw.githubusercontent.com/konflux-ci/konflux-ci/refs/heads/main/operator/hack/setup-release.sh /tsf/scripts/setup-release.sh
-RUN chmod +x /tsf/scripts/*.sh
+COPY scripts ./scripts
+RUN chmod +x ./scripts/*.sh
 
 RUN groupadd --gid 9999 -r tsf && \
     useradd -r -d /tsf -g tsf -s /sbin/nologin --uid 9999 tsf && \
