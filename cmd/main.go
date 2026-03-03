@@ -45,6 +45,7 @@ func main() {
 	}
 
 	// 5. Run the application
+	printDisclaimer()
 	if err := app.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

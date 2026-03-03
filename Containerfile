@@ -89,5 +89,6 @@ RUN echo "# jq" && jq --version && \
     echo "# oc" && oc version
 
 ENV KUBECONFIG=/tsf/.kube/config
+ENV TSF_NO_DISCLAIMER=""
 
 ENTRYPOINT ["tsf"]
