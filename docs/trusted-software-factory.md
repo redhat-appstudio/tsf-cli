@@ -11,7 +11,7 @@
 ## Quickstart
 
 1. Copy [private.env.template](../hack/private.env.template) as `tsf.env` and fill in the blanks. See the [Getting the information for tsf.env](#getting-the-information-for-tsfenv) section if you need help finding the required values.
-2. Start a container with `podman run -it --rm --env-file tsf.env --entrypoint bash -p 8228:8228 --pull always quay.io/roming22-org/tsf:latest --login`.
+2. Start a container with `podman run -it --rm --env-file tsf.env --entrypoint bash -p 8228:8228 --pull always quay.io/redhat-ads/tsf-cli:unstable --login`.
 3. Log in to the cluster with `oc login "$OCP__API_ENDPOINT" --username "$OCP__USERNAME" --password "$OCP__PASSWORD"`
 4. Create the TSF config on the cluster with `tsf config --create`.
 5. Check if the Red Hat Cert-Manager operator is already installed in the cluster. If it is, edit the `tsf-config` ConfigMap in the `tsf` namespace to set `manageSubscription: false` for the Cert-Manager product.
