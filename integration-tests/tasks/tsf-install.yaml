@@ -1,0 +1,85 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: install-tsf-cli
+spec:
+  params:
+    - name: ocp-login-command
+      type: string
+      description: "Command to log in to the OpenShift cluster."
+    - name: job-spec
+      type: string
+      description: "The job specification containing details of the test execution."
+    - name: tsf-cli-image
+      type: string
+      description: "The tsf-cli image containing the tsf-cli binary."
+    - name: tsf-cli-repo-url
+      type: string
+      description: "Repository URL used to fetch integration installer script."
+    - name: tsf-cli-revision
+      type: string
+      description: "Git revision used to fetch integration installer script."
+  volumes:
+    - name: tsf-cli-install
+      secret:
+        secretName: tsf-cli-install
+  steps:
+    - name: install-tsf
+      image: $(params.tsf-cli-image)
+      env:
+        - name: OCP_LOGIN_COMMAND
+          value: "$(params.ocp-login-command)"
+        - name: TSF_CLI_REPO_URL
+          value: "$(params.tsf-cli-repo-url)"
+        - name: TSF_CLI_REVISION
+          value: "$(params.tsf-cli-revision)"
+      volumeMounts:
+        - name: tsf-cli-install
+          mountPath: /usr/local/tsf-cli-install
+      script: |
+        #!/usr/bin/env bash
+        set -o errexit
+        set -o nounset
+        set -o pipefail
+
+        # Ensure we are authenticated before running install.sh.
+        eval "${OCP_LOGIN_COMMAND}"
+
+        # Export env vars from tsf-cli-install secret
+        export GITHUB__ORG="$(cat /usr/local/tsf-cli-install/github-org)"
+        export GITHUB__APP_ID="$(cat /usr/local/tsf-cli-install/github-app-id)"
+        export GITHUB__APP_PRIVATE_KEY="$(cat /usr/local/tsf-cli-install/github-app-private-key)"
+        export GITHUB__APP_WEBHOOK_SECRET="$(cat /usr/local/tsf-cli-install/github-app-webhook-secret)"
+        export QUAY__ORG="$(cat /usr/local/tsf-cli-install/quay-org)"
+        export QUAY__API_TOKEN="$(cat /usr/local/tsf-cli-install/quay-api-token)"
+        export QUAY__URL="https://quay.io"
+
+        # Fetch installer script from the selected integration repo/revision.
+        clean_repo_url="${TSF_CLI_REPO_URL#https://github.com/}"
+        clean_repo_url="${clean_repo_url#http://github.com/}"
+        clean_repo_url="${clean_repo_url#git@github.com:}"
+        clean_repo_url="${clean_repo_url%.git}"
+        repo_org="${clean_repo_url%%/*}"
+        repo_name="${clean_repo_url#*/}"
+
+        if [[ -z "${repo_org}" || -z "${repo_name}" || "${repo_name}" == "${clean_repo_url}" ]]; then
+          echo "ERROR: unable to derive org/repo from TSF_CLI_REPO_URL='${TSF_CLI_REPO_URL}'"
+          exit 1
+        fi
+
+        script_url="https://raw.githubusercontent.com/${repo_org}/${repo_name}/${TSF_CLI_REVISION}/integration-tests/scripts/install.sh"
+        script_path="$(mktemp /tmp/tsf-install.sh.XXXXXX)"
+
+        echo "Downloading installer script from: ${script_url}"
+        if command -v curl >/dev/null 2>&1; then
+          curl --fail --silent --show-error --location "${script_url}" --output "${script_path}"
+        elif command -v wget >/dev/null 2>&1; then
+          wget -qO "${script_path}" "${script_url}"
+        else
+          echo "ERROR: neither curl nor wget is available to fetch install.sh"
+          exit 1
+        fi
+
+        chmod +x "${script_path}"
+        bash "${script_path}"

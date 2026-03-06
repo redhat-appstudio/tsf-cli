@@ -1,0 +1,204 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: tsf-cli-e2e
+spec:
+  description: |-
+    Runs TSF end-to-end tests on an ephemeral ROSA HCP cluster.
+    The pipeline provisions the cluster, installs TSF from the
+    `tsf-cli` container image, executes the test workflow, and then
+    deprovisions the cluster.
+  params:
+    - name: ocp-version
+      description: 'The OpenShift version to use for the ephemeral cluster deployment.'
+      type: string
+    - name: cloud-credential-key
+      type: string
+      description: The key secret from konflux-test-infra-secret where all AWS ROSA configurations are stored.
+    - name: replicas
+      description: 'The number of replicas for the cluster nodes.'
+      type: string
+    - name: machine-type
+      description: 'The type of machine to use for the cluster nodes.'
+      type: string
+    - name: job-spec
+      type: string
+    - name: konflux-test-infra-secret
+      description: The name of secret where testing infrastructures credentials are stored.
+      type: string
+    - name: tsf-cli-image
+      type: string
+      description: "Image from where the `tsf-cli` binary will be extracted (from path /usr/local/bin)."
+      default: "quay.io/redhat-user-workloads/rhtap-shared-team-tenant/tsf-cli:latest"
+    - name: tsf-cli-repo-url
+      description: Repository URL used to resolve integration test tasks/pipelines from this repo.
+      type: string
+      default: "https://github.com/redhat-appstudio/tsf-cli.git"
+    - name: tsf-cli-revision
+      description: Git revision (prefer commit SHA for PR validation) used to resolve integration test tasks/pipelines.
+      type: string
+      default: "main"
+    - name: oci-container
+      description: OCI image reference used by catalog tasks to store and report pipeline artifacts.
+      type: string
+      default: "quay.io/konflux-test-storage/rhads/tsf-cli:$(context.pipelineRun.name)"
+  tasks:
+    - name: rosa-hcp-metadata
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/rosa/hosted-cp/rosa-hcp-metadata/0.1/rosa-hcp-metadata.yaml
+    - name: provision-rosa
+      runAfter:
+        - rosa-hcp-metadata
+      timeout: "1h0m"
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/rosa/hosted-cp/rosa-hcp-provision/0.2/rosa-hcp-provision.yaml
+      params:
+        - name: cluster-name
+          value: "$(tasks.rosa-hcp-metadata.results.cluster-name)"
+        - name: ocp-version
+          value: "$(params.ocp-version)"
+        - name: replicas
+          value: "$(params.replicas)"
+        - name: machine-type
+          value: "$(params.machine-type)"
+        - name: konflux-test-infra-secret
+          value: "$(params.konflux-test-infra-secret)"
+        - name: cloud-credential-key
+          value: "$(params.cloud-credential-key)"
+        - name: oci-container
+          value: "$(params.oci-container)"
+    - name: install-tsf
+      runAfter:
+        - provision-rosa
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: $(params.tsf-cli-repo-url)
+          - name: revision
+            value: $(params.tsf-cli-revision)
+          - name: pathInRepo
+            value: integration-tests/tasks/tsf-install.yaml
+      params:
+        - name: ocp-login-command
+          value: "$(tasks.provision-rosa.results.ocp-login-command)"
+        - name: job-spec
+          value: "$(params.job-spec)"
+        - name: tsf-cli-image
+          value: $(params.tsf-cli-image)
+        - name: tsf-cli-repo-url
+          value: "$(params.tsf-cli-repo-url)"
+        - name: tsf-cli-revision
+          value: "$(params.tsf-cli-revision)"
+    - name: register-sprayproxy
+      runAfter:
+        - install-tsf
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/sprayproxy/sprayproxy-provision/0.1/sprayproxy-provision.yaml
+      params:
+        - name: ocp-login-command
+          value: "$(tasks.provision-rosa.results.ocp-login-command)"
+  finally:
+    - name: deprovision-rosa
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/rosa/hosted-cp/rosa-hcp-deprovision/0.2/rosa-hcp-deprovision.yaml
+      params:
+        - name: test-name
+          value: $(context.pipelineRun.name)
+        - name: ocp-login-command
+          value: "$(tasks.provision-rosa.results.ocp-login-command)"
+        - name: oci-container
+          value: "$(params.oci-container)"
+        - name: cluster-name
+          value: "$(tasks.rosa-hcp-metadata.results.cluster-name)"
+        - name: konflux-test-infra-secret
+          value: "$(params.konflux-test-infra-secret)"
+        - name: cloud-credential-key
+          value: "$(params.cloud-credential-key)"
+        - name: pipeline-aggregate-status
+          value: "$(tasks.status)"
+    - name: deprovision-sprayproxy
+      when:
+        - input: "$(tasks.register-sprayproxy.status)"
+          operator: in
+          values:
+            - "Succeeded"
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/sprayproxy/sprayproxy-deprovision/0.1/sprayproxy-deprovision.yaml
+      params:
+        - name: ocp-login-command
+          value: "$(tasks.provision-rosa.results.ocp-login-command)"
+    - name: pull-request-status-message
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/pull-request-comment/0.2/pull-request-comment.yaml
+      params:
+        - name: test-name
+          value: "$(context.pipelineRun.name)"
+        - name: oci-container
+          value: "$(params.oci-container)"
+        - name: pipeline-aggregate-status
+          value: "$(tasks.status)"
+        - name: job-spec
+          value: "$(params.job-spec)"
+    - name: store-pipeline-status
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: tasks/store-pipeline-status/0.1/store-pipeline-status.yaml
+      params:
+        - name: oci-ref
+          value: "$(params.oci-container)"
+        - name: credentials-secret-name
+          value: "$(params.konflux-test-infra-secret)"
+        - name: pipeline-aggregate-status
+          value: $(tasks.status)
+        - name: pipelinerun-name
+          value: $(context.pipelineRun.name)
