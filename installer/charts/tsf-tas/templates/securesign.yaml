@@ -16,10 +16,6 @@ spec:
       organizationName: {{ $secureSign.fulcio.certificate.organizationName }}
     config:
       OIDCIssuers:
-        - Issuer: "{{ $secureSign.fulcio.oidc.issuerURL }}"
-          IssuerURL: "{{ $secureSign.fulcio.oidc.issuerURL }}"
-          ClientID: {{ $secureSign.fulcio.oidc.clientID }}
-          Type: email
 {{- $issuer := "https://kubernetes.default.svc" -}}
 {{- $configmap := lookup "v1" "ConfigMap" "openshift-kube-apiserver" "config" -}}
 {{- if $configmap -}}
@@ -27,6 +23,10 @@ spec:
   {{- $issuer = index $configYaml.apiServerArguments "service-account-issuer" | first -}}
 {{- end }}
         - ClientID: sigstore
+          Issuer: {{ $issuer }}
+          IssuerURL: {{ $issuer }}
+          Type: kubernetes
+        - ClientID: {{ $issuer }}
           Issuer: {{ $issuer }}
           IssuerURL: {{ $issuer }}
           Type: kubernetes
