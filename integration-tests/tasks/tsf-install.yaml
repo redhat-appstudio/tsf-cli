@@ -8,9 +8,6 @@ spec:
     - name: ocp-login-command
       type: string
       description: "Command to log in to the OpenShift cluster."
-    - name: job-spec
-      type: string
-      description: "The job specification containing details of the test execution."
     - name: tsf-cli-image
       type: string
       description: "The tsf-cli image containing the tsf-cli binary."
@@ -56,10 +53,15 @@ spec:
         export QUAY__URL="https://quay.io"
 
         # Fetch installer script from the selected integration repo/revision.
+        # Expected format: https://github.com/<org>/<repo>[.git]
+        if [[ "${TSF_CLI_REPO_URL}" != https://github.com/* ]]; then
+          echo "ERROR: TSF_CLI_REPO_URL must start with 'https://github.com/'"
+          exit 1
+        fi
+
         clean_repo_url="${TSF_CLI_REPO_URL#https://github.com/}"
-        clean_repo_url="${clean_repo_url#http://github.com/}"
-        clean_repo_url="${clean_repo_url#git@github.com:}"
         clean_repo_url="${clean_repo_url%.git}"
+        clean_repo_url="${clean_repo_url%/}"
         repo_org="${clean_repo_url%%/*}"
         repo_name="${clean_repo_url#*/}"
 

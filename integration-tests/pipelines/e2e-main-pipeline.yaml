@@ -28,8 +28,20 @@ spec:
         description: "List of OCP versions used to fan out nested tsf-cli-e2e runs."
         type: array
         default:
-          - "4.19"
           - "4.20"
+          - "4.21"
+      - name: min-success-count
+        description: "Minimum number of successful nested runs required for main pipeline success."
+        type: string
+        default: "2"
+      - name: konflux-ui-url
+        description: "Base Konflux UI URL used to build nested PipelineRun links."
+        type: string
+        default: "https://konflux-ui.apps.stone-prd-rh01.pg1f.p1.openshiftapps.com"
+      - name: artifact-browser-url
+        description: "Base Artifact Browser URL used to build nested test log links."
+        type: string
+        default: "https://app-artifact-browser.apps.rosa.konflux-qe.zmr9.p3.openshiftapps.com"
     tasks:
       - name: test-metadata
         taskRef:
@@ -47,6 +59,7 @@ spec:
       - name: start-nested-pipelines
         displayName: "Start tsf-cli-e2e Pipeline ($(params.ocp-version))"
         timeout: "2h30m"
+        onError: continue
         runAfter:
           - test-metadata
         matrix:
@@ -75,3 +88,48 @@ spec:
             value: $(params.ocp-replicas)
           - name: main-pipeline-run-name
             value: $(context.pipelineRun.name)
+      - name: final-result-gate
+        runAfter:
+          - start-nested-pipelines
+        taskRef:
+          resolver: git
+          params:
+            - name: url
+              value: https://github.com/redhat-appstudio/tsf-cli.git
+            - name: revision
+              value: main
+            - name: pathInRepo
+              value: integration-tests/tasks/final-result-gate.yaml
+        params:
+          - name: child-summaries-b64
+            value: $(tasks.start-nested-pipelines.results.child-summary-b64[*])
+          - name: min-success-count
+            value: $(params.min-success-count)
+          - name: konflux-ui-url
+            value: $(params.konflux-ui-url)
+    finally:
+      - name: pull-request-status-message
+        taskRef:
+          resolver: git
+          params:
+            - name: url
+              value: https://github.com/xinredhat/tsf-cli.git
+            - name: revision
+              value: enhance_e2e-ci
+            - name: pathInRepo
+              value: integration-tests/tasks/pull-request-comment-multi.yaml
+        params:
+          - name: test-name
+            value: $(context.pipelineRun.name)
+          - name: child-summaries-b64
+            value: $(tasks.start-nested-pipelines.results.child-summary-b64[*])
+          - name: pipeline-aggregate-status
+            value: $(tasks.status)
+          - name: job-spec
+            value: $(tasks.test-metadata.results.job-spec)
+          - name: konflux-ui-url
+            value: $(params.konflux-ui-url)
+          - name: artifact-browser-url
+            value: $(params.artifact-browser-url)
+          - name: konflux-test-infra-secret
+            value: $(params.konflux-test-infra-secret)

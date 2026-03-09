@@ -26,18 +26,16 @@ spec:
     - name: ocp-instance-type
       description: "The type of machine to use for the cluster nodes"
       type: string
-      default: "m5.2xlarge"
     - name: ocp-replicas
       description: "The number of replicas for the cluster nodes"
       type: string
-      default: "3"
     - name: main-pipeline-run-name
       description: "Main pipeline run name for labeling"
       type: string
   results:
-    - name: pipeline-run
+    - name: child-summary-b64
       type: string
-      description: "Started pipeline run name"
+      description: "Base64-encoded JSON payload: {\"run\":\"<child-run>\",\"status\":\"Succeeded|Failed\",\"version\":\"<ocp-version>\"}."
   volumes:
     - name: step-shared
       emptyDir: {}
@@ -54,18 +52,37 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
 
-        # Extract repo metadata from job-spec once for handoff.
-        repo_name="$(jq -r '.git.repo // empty' <<< "${JOB_SPEC}")"
-        repo_url="$(jq -r '.git.url // empty' <<< "${JOB_SPEC}")"
-        revision="$(jq -r '.git.revision // empty' <<< "${JOB_SPEC}")"
-        repo_org="$(jq -r '.git.source_repo_org // empty' <<< "${JOB_SPEC}")"
+        # Extract repo metadata from job-spec once for shared values.
+        url_repository="$(jq -r '.git.repo // empty' <<< "${JOB_SPEC}")"
+        url_org="$(jq -r '.git.org // empty' <<< "${JOB_SPEC}")"
+        git_url="$(jq -r '.git.url // empty' <<< "${JOB_SPEC}")"
+        git_revision="$(jq -r '.git.commit_sha // empty' <<< "${JOB_SPEC}")"
+        pr_number="$(jq -r '.git.pull_request_number // empty' <<< "${JOB_SPEC}")"
+        event_type="$(jq -r '.event_type // .git.event_type // empty' <<< "${JOB_SPEC}")"
+        tsf_cli_image="$(jq -r '.container_image // empty' <<< "${JOB_SPEC}")"
 
-        printf "%s" "${repo_url}" > /shared/tsf-cli-repo-url
-        printf "%s" "${revision}" > /shared/tsf-cli-revision
-        printf "%s" "${repo_org}" > /shared/tsf-cli-repo-org
-        printf "%s" "${repo_name}" > /shared/tsf-cli-repo-name
+        printf "%s" "${url_repository}" > /shared/url-repository
+        printf "%s" "${url_org}" > /shared/url-org
+        printf "%s" "${git_url}" > /shared/git-url
+        printf "%s" "${git_revision}" > /shared/git-revision
+        printf "%s" "${pr_number}" > /shared/pr-number
+        printf "%s" "${event_type}" > /shared/event-type
+        printf "%s" "${tsf_cli_image}" > /shared/tsf-cli-image
 
-    - name: start-single
+        # Debug shared values to simplify failure investigation.
+        # Auto-discover /shared files so newly added shared fields are logged automatically.
+        echo "Shared values:"
+        shopt -s nullglob
+        shared_files=(/shared/*)
+        for file in "${shared_files[@]}"; do
+          if [[ -f "${file}" ]]; then
+            key="${file##*/}"
+            value="$(cat "${file}")"
+            echo "/shared/${key}=${value}"
+          fi
+        done
+
+    - name: start-pipeline
       image: quay.io/openshift-pipeline/ci
       volumeMounts:
         - name: step-shared
@@ -101,21 +118,36 @@ spec:
         #!/usr/bin/env bash
         set -euo pipefail
 
-        TSF_CLI_REPO_URL="$(cat /shared/tsf-cli-repo-url)"
-        TSF_CLI_REVISION="$(cat /shared/tsf-cli-revision)"
-        TSF_CLI_REPO_ORG="$(cat /shared/tsf-cli-repo-org)"
-        TSF_CLI_REPO_NAME="$(cat /shared/tsf-cli-repo-name)"
+        print_tkn_params() {
+          local -a args=("$@")
+          local idx=0
+          local total_args="${#args[@]}"
 
-        pipeline_url="https://raw.githubusercontent.com/${TSF_CLI_REPO_ORG}/${TSF_CLI_REPO_NAME}/${TSF_CLI_REVISION}/integration-tests/pipelines/tsf-cli-e2e.yaml"
+          echo "tkn_params:"
+          while (( idx < total_args )); do
+            local current="${args[$idx]}"
+            local next_idx=$((idx + 1))
+
+            if [[ "${current}" == --* ]] && (( next_idx < total_args )) && [[ "${args[$next_idx]}" != --* ]]; then
+              echo "${current} ${args[$next_idx]}"
+              idx=$((idx + 2))
+            else
+              echo "${current}"
+              idx=$((idx + 1))
+            fi
+          done
+        }
+
+        URL_ORG="$(cat /shared/url-org)"
+        URL_REPOSITORY="$(cat /shared/url-repository)"
+        GIT_URL="$(cat /shared/git-url)"
+        GIT_REVISION="$(cat /shared/git-revision)"
+        PR_NUMBER="$(cat /shared/pr-number)"
+        EVENT_TYPE="$(cat /shared/event-type)"
+        TSF_CLI_IMAGE="$(cat /shared/tsf-cli-image)"
+
+        pipeline_url="https://raw.githubusercontent.com/${URL_ORG}/${URL_REPOSITORY}/${GIT_REVISION}/integration-tests/pipelines/tsf-cli-e2e.yaml"
         echo "Starting tsf-cli-e2e pipeline from ${pipeline_url} for OCP version ${OCP_VERSION}"
-
-        # Derive optional metadata labels from test-metadata job-spec payload.
-        URL_ORG="$(jq -r '.git.org // empty' <<< "${JOB_SPEC}")"
-        URL_REPOSITORY="$(jq -r '.git.repo // empty' <<< "${JOB_SPEC}")"
-        GIT_REVISION="$(jq -r '.git.commit_sha // empty' <<< "${JOB_SPEC}")"
-        PR_NUMBER="$(jq -r '.git.pull_request_number // empty' <<< "${JOB_SPEC}")"
-        EVENT_TYPE="$(jq -r '.event_type // .git.event_type // empty' <<< "${JOB_SPEC}")"
-        TSF_CLI_IMAGE="$(jq -r '.container_image // empty' <<< "${JOB_SPEC}")"
 
         # Required child params and static pipeline labels.
         tkn_params=(
@@ -125,10 +157,8 @@ spec:
           "--param" "cloud-credential-key=${CLOUD_CREDENTIAL_KEY}"
           "--param" "machine-type=${OCP_INSTANCE_TYPE}"
           "--param" "replicas=${OCP_REPLICAS}"
-          "--param" "tsf-cli-repo-url=${TSF_CLI_REPO_URL}"
-          "--param" "tsf-cli-revision=${TSF_CLI_REVISION}"
-          # "--param" "tsf-test-repo-url=${TSF_TEST_REPO_URL}"
-          # "--param" "tsf-test-revision=${TSF_TEST_REVISION}"
+          "--param" "tsf-cli-repo-url=${GIT_URL}"
+          "--param" "tsf-cli-revision=${GIT_REVISION}"
           "--use-param-defaults"
           "--labels" "appstudio.openshift.io/component=${KONFLUX_COMPONENT_NAME}"
           "--labels" "appstudio.openshift.io/application=${KONFLUX_APPLICATION_NAME}"
@@ -151,11 +181,13 @@ spec:
           tkn_params+=("--param" "tsf-cli-image=${TSF_CLI_IMAGE}")
         fi
 
-        echo "tkn_params: \n${tkn_params[@]}"
+        print_tkn_params "${tkn_params[@]}"
 
         pipeline_run="$(tkn pipeline start -f "${pipeline_url}" "${tkn_params[@]}")"
         pipeline_run_name="${pipeline_run##*/}"
-        printf "%s" "${pipeline_run_name}" > "$(results.pipeline-run.path)"
+
+        # Result paths as env vars for readability inside subshells.
+        CHILD_SUMMARY_B64_PATH="$(results.child-summary-b64.path)"
 
         # Wait for PipelineRun resource to appear.
         PIPELINE_RUN_NAME="${pipeline_run_name}" KONFLUX_NAMESPACE="${KONFLUX_NAMESPACE}" timeout --foreground 300s bash -c '
@@ -165,18 +197,24 @@ spec:
           done
         '
 
-        # Wait for completion: Succeeded=True (pass) or Succeeded=False (fail).
-        PIPELINE_RUN_NAME="${pipeline_run_name}" KONFLUX_NAMESPACE="${KONFLUX_NAMESPACE}" timeout --foreground 2h bash -c '
+        # Wait for completion and persist result for threshold evaluation.
+        export PIPELINE_RUN_NAME="${pipeline_run_name}"
+        export CHILD_SUMMARY_B64_PATH OCP_VERSION
+        timeout --foreground 2h bash -c '
           while true; do
             status=$(oc get "pipelinerun/${PIPELINE_RUN_NAME}" -n "${KONFLUX_NAMESPACE}" -o jsonpath="{.status.conditions[?(@.type==\"Succeeded\")].status}" 2>/dev/null || true)
             case "${status}" in
               True)
                 echo "Pipeline run ${PIPELINE_RUN_NAME} completed successfully."
+                summary_payload="{\"run\":\"${PIPELINE_RUN_NAME}\",\"status\":\"Succeeded\",\"version\":\"${OCP_VERSION}\"}"
+                printf "%s" "${summary_payload}" | base64 | tr -d \\012 > "${CHILD_SUMMARY_B64_PATH}"
                 exit 0
                 ;;
               False)
                 echo "Pipeline run ${PIPELINE_RUN_NAME} failed."
-                exit 1
+                summary_payload="{\"run\":\"${PIPELINE_RUN_NAME}\",\"status\":\"Failed\",\"version\":\"${OCP_VERSION}\"}"
+                printf "%s" "${summary_payload}" | base64 | tr -d \\012 > "${CHILD_SUMMARY_B64_PATH}"
+                exit 0
                 ;;
               *)
                 echo "Pipeline run ${PIPELINE_RUN_NAME} still running..."

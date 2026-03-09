@@ -85,6 +85,7 @@ spec:
     - name: install-tsf
       runAfter:
         - provision-rosa
+      timeout: "15m"
       taskRef:
         resolver: git
         params:
@@ -97,8 +98,6 @@ spec:
       params:
         - name: ocp-login-command
           value: "$(tasks.provision-rosa.results.ocp-login-command)"
-        - name: job-spec
-          value: "$(params.job-spec)"
         - name: tsf-cli-image
           value: $(params.tsf-cli-image)
         - name: tsf-cli-repo-url
@@ -164,25 +163,6 @@ spec:
       params:
         - name: ocp-login-command
           value: "$(tasks.provision-rosa.results.ocp-login-command)"
-    - name: pull-request-status-message
-      taskRef:
-        resolver: git
-        params:
-          - name: url
-            value: https://github.com/konflux-ci/tekton-integration-catalog.git
-          - name: revision
-            value: main
-          - name: pathInRepo
-            value: tasks/pull-request-comment/0.2/pull-request-comment.yaml
-      params:
-        - name: test-name
-          value: "$(context.pipelineRun.name)"
-        - name: oci-container
-          value: "$(params.oci-container)"
-        - name: pipeline-aggregate-status
-          value: "$(tasks.status)"
-        - name: job-spec
-          value: "$(params.job-spec)"
     - name: store-pipeline-status
       taskRef:
         resolver: git

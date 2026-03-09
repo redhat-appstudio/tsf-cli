@@ -1,0 +1,100 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: pull-request-commenter-multi
+  annotations:
+    tekton.dev/displayName: "Pull Request Comment (Multi PipelineRuns)"
+    tekton.dev/categories: "Pipeline"
+    tekton.dev/tags: "pipeline,pr-comment,e2e,matrix"
+spec:
+  description: >-
+    Posts one consolidated PR comment with a table of multiple child PipelineRun
+    outcomes.
+  params:
+    - name: test-name
+      type: string
+      description: Main PipelineRun name for cancellation/sanity checks.
+    - name: child-summaries-b64
+      type: array
+      description: Base64-encoded JSON entries from matrix children; decoded schema is {"run":"<child-run>","status":"Succeeded|Failed"}.
+    - name: job-spec
+      type: string
+      description: Job spec JSON from test-metadata, used for repository and PR context.
+    - name: pipeline-aggregate-status
+      type: string
+      description: Aggregate status of non-finally tasks in the main pipeline (for headline/skip policy).
+      default: None
+    - name: comment-tag
+      type: string
+      description: Hidden marker included in each consolidated comment for traceability while preserving comment history.
+      default: tsf-cli-e2e-matrix
+    - name: include-success-comment
+      type: string
+      description: Set to "true" to always comment even when aggregate is Succeeded and no child failures exist.
+      default: "false"
+    - name: konflux-ui-url
+      type: string
+      description: Base Konflux UI URL used to build child PipelineRun log links.
+    - name: artifact-browser-url
+      type: string
+      description: Optional Artifact Browser base URL. If empty, test-log links fall back to Konflux logs.
+      default: ""
+    - name: konflux-test-infra-secret
+      type: string
+      description: Secret containing GitHub bot token at key github-bot-commenter-token.
+      default: "konflux-test-infra"
+  volumes:
+    - name: konflux-test-infra-volume
+      secret:
+        secretName: $(params.konflux-test-infra-secret)
+  steps:
+    - name: pull-request-comment
+      image: quay.io/konflux-qe-incubator/konflux-qe-tools:latest
+      workingDir: /workspace
+      env:
+        - name: JOB_SPEC
+          value: "$(params.job-spec)"
+        - name: TEST_NAME
+          value: "$(params.test-name)"
+        - name: PIPELINE_RUN_AGGREGATE_STATUS
+          value: "$(params.pipeline-aggregate-status)"
+        - name: COMMENT_TAG
+          value: "$(params.comment-tag)"
+        - name: INCLUDE_SUCCESS_COMMENT
+          value: "$(params.include-success-comment)"
+        - name: KONFLUX_UI_URL
+          value: "$(params.konflux-ui-url)"
+        - name: ARTIFACT_BROWSER_BASE_URL
+          value: "$(params.artifact-browser-url)"
+        - name: KONFLUX_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: KONFLUX_APPLICATION_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['appstudio.openshift.io/application']
+      args:
+        - --summaries-b64
+        - $(params.child-summaries-b64[*])
+      volumeMounts:
+        - name: konflux-test-infra-volume
+          mountPath: /usr/local/konflux-test-infra
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        export GITHUB_TOKEN="$(cat /usr/local/konflux-test-infra/github-bot-commenter-token)"
+
+        GIT_ORG="$(echo "${JOB_SPEC}" | jq -r '.git.org')"
+        REPO_NAME="$(echo "${JOB_SPEC}" | jq -r '.git.repo')"
+        GIT_REVISION="$(echo "${JOB_SPEC}" | jq -r '.git.commit_sha')"
+
+        script_url="https://raw.githubusercontent.com/${GIT_ORG}/${REPO_NAME}/${GIT_REVISION}/integration-tests/scripts/pr-comment-multi.sh"
+        script_path="$(mktemp /tmp/pr-comment-multi.XXXXXX.sh)"
+
+        echo "Downloading script from: ${script_url}"
+        curl --fail --silent --show-error --location "${script_url}" --output "${script_path}"
+        chmod +x "${script_path}"
+        bash "${script_path}" "$@"

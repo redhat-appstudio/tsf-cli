@@ -1,0 +1,136 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: final-result-gate
+  annotations:
+    tekton.dev/displayName: "Final Result Gate"
+    tekton.dev/categories: "Pipeline"
+    tekton.dev/tags: "pipeline,result-gate,tsf-cli,e2e"
+spec:
+  description: >-
+    Evaluates nested pipeline outcomes and fails unless the number of successful
+    runs reaches min-success-count.
+  params:
+    - name: child-summaries-b64
+      description: "Array of base64-encoded JSON summaries: {\"run\":\"<name>\",\"status\":\"Succeeded|Failed\",\"version\":\"<ver>\"}"
+      type: array
+    - name: min-success-count
+      description: "Minimum number of successful child pipelines required"
+      type: string
+    - name: konflux-ui-url
+      description: "Base Konflux UI URL used to build child PipelineRun links"
+      type: string
+  results:
+    - name: gate-passed
+      type: string
+      description: "Whether the result gate was satisfied (true/false)."
+  steps:
+    - name: evaluate
+      image: quay.io/openshift-pipeline/ci
+      env:
+        - name: KONFLUX_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: KONFLUX_APPLICATION_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['appstudio.openshift.io/application']
+      args:
+        - --summaries-b64
+        - $(params.child-summaries-b64[*])
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        parse_sectioned_args() {
+          local section=""
+          for arg in "$@"; do
+            case "${arg}" in
+              --summaries-b64)
+                section="${arg}"
+                continue
+                ;;
+            esac
+
+            case "${section}" in
+              --summaries-b64) summaries_b64+=("${arg}") ;;
+              *)
+                echo "Unexpected argument '${arg}' before section marker."
+                exit 1
+                ;;
+            esac
+          done
+        }
+
+        build_console_url() {
+          local run_name="$1"
+          if [[ -z "${konflux_ui_url}" || -z "${KONFLUX_NAMESPACE}" || -z "${KONFLUX_APPLICATION_NAME}" || "${run_name}" == "N/A" ]]; then
+            echo "N/A"
+            return
+          fi
+          echo "${konflux_ui_url}/ns/${KONFLUX_NAMESPACE}/applications/${KONFLUX_APPLICATION_NAME}/pipelineruns/${run_name}"
+        }
+
+        min_success_count="$(params.min-success-count)"
+        konflux_ui_url="$(params.konflux-ui-url)"
+
+        if ! [[ "${min_success_count}" =~ ^[0-9]+$ ]]; then
+          echo "Invalid min-success-count '${min_success_count}': must be a non-negative integer."
+          exit 1
+        fi
+        if (( min_success_count <= 0 )); then
+          echo "Invalid min-success-count '${min_success_count}': must be greater than 0."
+          exit 1
+        fi
+
+        summaries_b64=()
+        parse_sectioned_args "$@"
+
+        total_summaries="${#summaries_b64[@]}"
+
+        if (( total_summaries == 0 )); then
+          echo "No child summaries received; all child pipelines may have been skipped."
+          exit 1
+        fi
+        if (( min_success_count > total_summaries )); then
+          echo "Invalid min-success-count '${min_success_count}': cannot be greater than number of summaries (${total_summaries})."
+          exit 1
+        fi
+
+        echo "Nested pipeline details:"
+        echo "------------------------------------------------------------"
+        success_count=0
+        for entry in "${summaries_b64[@]}"; do
+          decoded="$(echo "${entry}" | base64 -d 2>/dev/null || true)"
+          run_name="$(echo "${decoded}" | jq -r '.run // "N/A"')"
+          status="$(echo "${decoded}" | jq -r '.status // "Unknown"')"
+          version="$(echo "${decoded}" | jq -r '.version // "N/A"')"
+
+          if [[ "${status}" == "Succeeded" ]]; then
+            result_text="SUCCESS"
+            success_count=$((success_count + 1))
+          else
+            result_text="FAILED"
+          fi
+          console_url="$(build_console_url "${run_name}")"
+
+          echo "OCP ${version}:"
+          echo "  - result: ${result_text}"
+          echo "  - child_result_label: ${status}"
+          echo "  - child_pipeline_run: ${run_name}"
+          echo "  - console_url: ${console_url}"
+          echo "------------------------------------------------------------"
+        done
+
+        echo "Result gate: success_count=${success_count}, min_success_count=${min_success_count}, total_summaries=${total_summaries}"
+        if (( success_count >= min_success_count )); then
+          echo "Result gate satisfied: main pipeline should pass."
+          printf "true" > "$(results.gate-passed.path)"
+          exit 0
+        fi
+
+        echo "Result gate not satisfied: main pipeline should fail."
+        printf "false" > "$(results.gate-passed.path)"
+        exit 1
