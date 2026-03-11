@@ -71,6 +71,9 @@ iam:
         # other source into its database.
         cli:
           enabled: true
+        # Release client for SBOM-specific operations
+        release:
+          enabled: true
         # Testing user, meant to manage TPA's whole installation.
         testingManager:
           enabled: false

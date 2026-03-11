@@ -99,6 +99,15 @@ trustedProfileAnalyzer:
             secretKeyRef:
               name: tpa-realm-chicken-clients
               key: cli
+      # Release client, used for SBOM-specific operations with create and
+      # update permissions.
+      release:
+        clientId: release
+        clientSecret:
+          valueFrom:
+            secretKeyRef:
+              name: tpa-realm-clients
+              key: release
       # Testing clients, disabled by default. These clients are used for testing
       # TPA by injecting data in the system and analyzing the results, as a
       # regular user and a privileged manager.

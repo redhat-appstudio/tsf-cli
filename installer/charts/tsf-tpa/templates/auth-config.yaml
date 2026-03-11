@@ -1,0 +1,34 @@
+{{- $tpa := .Values.trustedProfileAnalyzer -}}
+{{- $oidc := $tpa.oidc -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tpa-auth-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tpa-auth
+    app.kubernetes.io/part-of: trustify
+data:
+  auth.yaml: |
+    authentication:
+      clients:
+        {{- range $clientName, $clientConfig := $oidc.clients }}
+        {{- if $clientConfig.clientId }}
+        - clientId: {{ $clientConfig.clientId }}
+          issuerUrl: {{ $oidc.issuerUrl }}
+          {{- if $clientConfig.additionalPermissions }}
+          additionalPermissions:
+            {{- range $clientConfig.additionalPermissions }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          scopeMappings: &keycloakScopeMappings
+            "create:document": [ "create.advisory", "create.importer", "create.metadata", "create.sbom", "create.weakness", "upload.dataset" ]
+            "read:document": [ "ai", "read.advisory", "read.importer", "read.metadata", "read.sbom", "read.weakness", "read.systemInformation" ]
+            "update:document": [ "update.advisory", "update.importer", "update.metadata", "update.sbom", "update.weakness" ]
+            "delete:document": [ "delete.advisory", "delete.importer", "delete.metadata", "delete.sbom", "delete.vulnerability", "delete.weakness" ]
+          tlsCaCertificates:
+            - "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+        {{- end }}
+        {{- end }}
