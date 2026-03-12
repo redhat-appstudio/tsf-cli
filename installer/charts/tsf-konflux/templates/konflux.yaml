@@ -19,6 +19,7 @@
 {{- $secretData := required (printf "Secret 'tsf-trustification-integration' not found in namespace '%s'" .Values.konflux.tsf.namespace) (get $tpaSecretObj "data") | default dict -}}
 {{- $trustifyServiceUrl := required (printf "bombastic_api_service_url not found in secret 'tsf-trustification-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "bombastic_api_service_url") | b64dec | toString -}}
 {{- $trustifyUrl := required (printf "bombastic_api_url not found in secret 'tsf-trustification-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "bombastic_api_url") | b64dec | toString -}}
+{{- $trustifyOIDCIssuerUrl := required (printf "oidc_issuer_url not found in secret 'tsf-trustification-integration' in namespace '%s'" .Values.konflux.tsf.namespace) (get $secretData "oidc_issuer_url") | b64dec | toString -}}
 
 {{- /* Enable imageController only when tsf-quay-integration url is https://quay.io */ -}}
 {{- $quaySecretObj := (lookup "v1" "Secret" .Values.konflux.tsf.namespace "tsf-quay-integration") | default dict -}}
@@ -52,6 +53,7 @@ spec:
           tufExternalUrl: {{ $tufExternalUrl | quote }}
           trustifyServerInternalUrl: {{ $trustifyServiceUrl | quote }}
           trustifyServerExternalUrl: {{ $trustifyUrl | quote }}
+          trustifyOIDCIssuerUrl: {{ $trustifyOIDCIssuerUrl | quote }}
       publicInfo:
         integrations:
           github:
