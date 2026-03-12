@@ -1,8 +1,10 @@
 {{- define "pipelines.TektonConfigPatch" -}}
   {{- $rekor_url := "" }}
+  {{- $fulcio_url := "" }}
   {{- $secretObj := (lookup "v1" "Secret" .Release.Namespace "tsf-tas-integration") | default dict -}}
   {{- $secretData := (get $secretObj "data") | default dict -}}
   {{- if $secretData }}
+    {{- $fulcio_url = $secretData.fulcio_url | b64dec }}
     {{- $rekor_url = $secretData.rekor_url | b64dec }}
   {{- end }}
 metadata:
@@ -13,7 +15,10 @@ metadata:
     app.kubernetes.io/managed-by: Helm
 spec:
   chain:
-    generateSigningSecret: true
+    signers.x509.fulcio.address: {{ $fulcio_url }}
+    signers.x509.fulcio.enabled: true
+    # token.file is technically not needed, but it avoids ambiguity.
+    signers.x509.identity.token.file: /var/run/secrets/kubernetes.io/serviceaccount/token
     transparency.enabled: 'true'
     transparency.url: {{ $rekor_url }}
   platforms:

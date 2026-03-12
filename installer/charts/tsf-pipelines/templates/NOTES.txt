@@ -5,11 +5,3 @@ Tekton Pipelines as Code:
 {{- else }}
   - URL: unset
 {{- end }}
-
-Tekton Chains:
-{{- $secretObj := (lookup "v1" "Secret" "openshift-pipelines" "signing-secrets") | default dict -}}
-{{- if $secretObj }}
-  - cosign signing key exists
-{{- else }}
-  - cosign signing key missing
-{{- end }}
