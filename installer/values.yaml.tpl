@@ -142,6 +142,8 @@ iam:
       clients:
         cli:
           enabled: true
+        release:
+          enabled: true
         testingManager:
           enabled: {{ $tpaTestingUsersEnabled }}
         testingUser:
@@ -243,6 +245,17 @@ trustedProfileAnalyzer:
             secretKeyRef:
               name: {{ $tpaOIDCClientsSecretName }}
               key: cli
+      release:
+        clientId: release
+        clientSecret:
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tpaOIDCClientsSecretName }}
+              key: release
+        additionalPermissions:
+          - "create.sbom"
+          - "read.sbom"
+          - "update.sbom"
 {{- if $tpaTestingUsersEnabled }}
       testingUser:
         clientSecret:

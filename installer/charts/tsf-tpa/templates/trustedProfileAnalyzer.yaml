@@ -36,6 +36,10 @@ spec:
     required ".tpa.oidc is required"
       $tpa.oidc | toYaml | nindent 8
   }}
+  authenticator:
+    configMapRef:
+      name: tpa-auth-config
+      key: auth.yaml
   openshift:
     useServiceCa: true
   partOf: trustify

@@ -898,6 +898,9 @@ spec:
         name: create:document
         protocol: openid-connect
       - attributes: {}
+        name: update:document
+        protocol: openid-connect
+      - attributes: {}
         name: delete:document
         protocol: openid-connect
       - attributes: {}
@@ -1507,6 +1510,77 @@ spec:
         standardFlowEnabled: false
         surrogateAuthRequired: false
         webOrigins: []
+      - alwaysDisplayInConsole: false
+        attributes:
+          access.token.lifespan: "300"
+          post.logout.redirect.uris: +
+        authenticationFlowBindingOverrides: {}
+        bearerOnly: false
+        clientAuthenticatorType: client-secret
+        clientId: release
+        secret: {{ get $oidcCredentialsTPA "release" | b64dec }}
+        consentRequired: false
+        defaultClientScopes:
+          - web-origins
+          - profile
+          - roles
+          - read:document
+          - email
+          - create:document
+          - update:document
+        directAccessGrantsEnabled: false
+        enabled: {{ $tpa.clients.release.enabled }}
+        frontchannelLogout: false
+        fullScopeAllowed: true
+        implicitFlowEnabled: false
+        nodeReRegistrationTimeout: -1
+        notBefore: 0
+        optionalClientScopes:
+          - address
+          - phone
+          - offline_access
+          - microprofile-jwt
+        protocol: openid-connect
+        protocolMappers:
+          - config:
+              access.token.claim: "true"
+              claim.name: clientHost
+              id.token.claim: "true"
+              introspection.token.claim: "true"
+              jsonType.label: String
+              user.session.note: clientHost
+            consentRequired: false
+            name: Client Host
+            protocol: openid-connect
+            protocolMapper: oidc-usersessionmodel-note-mapper
+          - config:
+              access.token.claim: "true"
+              claim.name: clientAddress
+              id.token.claim: "true"
+              introspection.token.claim: "true"
+              jsonType.label: String
+              user.session.note: clientAddress
+            consentRequired: false
+            name: Client IP Address
+            protocol: openid-connect
+            protocolMapper: oidc-usersessionmodel-note-mapper
+          - config:
+              access.token.claim: "true"
+              claim.name: client_id
+              id.token.claim: "true"
+              introspection.token.claim: "true"
+              jsonType.label: String
+              user.session.note: client_id
+            consentRequired: false
+            name: Client ID
+            protocol: openid-connect
+            protocolMapper: oidc-usersessionmodel-note-mapper
+        publicClient: false
+        redirectUris: []
+        serviceAccountsEnabled: true
+        standardFlowEnabled: false
+        surrogateAuthRequired: false
+        webOrigins: []
   {{- end }}
     components:
       org.keycloak.keys.KeyProvider:
@@ -1918,6 +1992,7 @@ spec:
         testing-manager: []
         testing-user: []
         cli: []
+        release: []
   {{- end }}
       realm:
         - attributes: {}
@@ -1960,6 +2035,9 @@ spec:
         roles:
           - {{ $iam.realmsName }}-manager
       - clientScope: create:document
+        roles:
+          - {{ $iam.realmsName }}-manager
+      - clientScope: update:document
         roles:
           - {{ $iam.realmsName }}-manager
       - clientScope: offline_access
@@ -2028,6 +2106,18 @@ spec:
         serviceAccountClientId: cli
         totp: false
         username: service-account-cli
+      - disableableCredentialTypes: []
+        emailVerified: false
+        enabled: true
+        groups: []
+        notBefore: 0
+        realmRoles:
+          - default-roles-{{ $iam.realmsName }}
+          - {{ $iam.realmsName }}-manager
+        requiredActions: []
+        serviceAccountClientId: release
+        totp: false
+        username: service-account-release
   {{- end }}
     verifyEmail: false
     waitIncrementSeconds: 60
