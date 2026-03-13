@@ -3,7 +3,6 @@
 ## Prerequisites
 
 * An OpenShift cluster with admin access
-* `oc` command line tool [installed](https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/cli_tools/openshift-cli-oc) in your local system.
 * A GitHub organization (create a test organization if needed)
 * A Quay.io account with access to an organization (currently only quay.io is supported; support for other Quay instances is planned for the future)
 * Podman [installed](https://podman.io/docs/installation) in your local system. Docker should also work but that is not a tested workflow. If using docker, simply replace `podman` with `docker` in the commands below.
