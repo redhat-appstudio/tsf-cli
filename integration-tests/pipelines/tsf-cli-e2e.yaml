@@ -57,7 +57,7 @@ spec:
     - name: provision-rosa
       runAfter:
         - rosa-hcp-metadata
-      timeout: "1h0m"
+      timeout: "1h30m"
       taskRef:
         resolver: git
         params:
