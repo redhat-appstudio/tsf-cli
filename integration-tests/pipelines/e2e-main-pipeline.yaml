@@ -113,9 +113,9 @@ spec:
           resolver: git
           params:
             - name: url
-              value: https://github.com/xinredhat/tsf-cli.git
+              value: https://github.com/redhat-appstudio/tsf-cli.git
             - name: revision
-              value: enhance_e2e-ci
+              value: main
             - name: pathInRepo
               value: integration-tests/tasks/pull-request-comment-multi.yaml
         params:
