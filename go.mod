@@ -117,7 +117,7 @@ require (
 	github.com/xlab/treeprint v1.2.0 // indirect
 	github.com/xlzd/gotp v0.1.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	gitlab.com/gitlab-org/api/client-go v1.43.0 // indirect
+	gitlab.com/gitlab-org/api/client-go/v2 v2.6.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.40.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
