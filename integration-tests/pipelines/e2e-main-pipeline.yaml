@@ -56,8 +56,8 @@ spec:
         params:
           - name: SNAPSHOT
             value: $(params.SNAPSHOT)
-      - name: start-nested-pipelines
-        displayName: "Start tsf-cli-e2e Pipeline ($(params.ocp-version))"
+      - name: run-e2e
+        displayName: "TSF CLI E2E ($(params.ocp-version))"
         timeout: "2h30m"
         onError: continue
         runAfter:
@@ -66,7 +66,7 @@ spec:
           params:
             - name: ocp-version
               value: $(params.ocp-versions[*])
-        taskRef:
+        pipelineRef:
           resolver: git
           params:
             - name: url
@@ -74,7 +74,7 @@ spec:
             - name: revision
               value: main
             - name: pathInRepo
-              value: integration-tests/tasks/start-pipeline.yaml
+              value: integration-tests/pipelines/tsf-cli-e2e.yaml
         params:
           - name: job-spec
             value: $(tasks.test-metadata.results.job-spec)
@@ -82,15 +82,21 @@ spec:
             value: $(params.konflux-test-infra-secret)
           - name: cloud-credential-key
             value: $(params.cloud-credential-key)
-          - name: ocp-instance-type
+          - name: machine-type
             value: $(params.ocp-instance-type)
-          - name: ocp-replicas
+          - name: replicas
             value: $(params.ocp-replicas)
-          - name: main-pipeline-run-name
-            value: $(context.pipelineRun.name)
+          - name: tsf-cli-repo-url
+            value: $(tasks.test-metadata.results.git-url)
+          - name: tsf-cli-revision
+            value: $(tasks.test-metadata.results.git-revision)
+          - name: target-branch
+            value: $(tasks.test-metadata.results.target-branch)
+          - name: tsf-cli-image
+            value: $(tasks.test-metadata.results.container-image)
       - name: final-result-gate
         runAfter:
-          - start-nested-pipelines
+          - run-e2e
         taskRef:
           resolver: git
           params:
@@ -102,7 +108,7 @@ spec:
               value: integration-tests/tasks/final-result-gate.yaml
         params:
           - name: child-summaries-b64
-            value: $(tasks.start-nested-pipelines.results.child-summary-b64[*])
+            value: $(tasks.run-e2e.results.child-summary-b64[*])
           - name: min-success-count
             value: $(params.min-success-count)
           - name: konflux-ui-url
@@ -122,7 +128,7 @@ spec:
           - name: test-name
             value: $(context.pipelineRun.name)
           - name: child-summaries-b64
-            value: $(tasks.start-nested-pipelines.results.child-summary-b64[*])
+            value: $(tasks.run-e2e.results.child-summary-b64[*])
           - name: pipeline-aggregate-status
             value: $(tasks.status)
           - name: job-spec

@@ -9,6 +9,10 @@ spec:
     The pipeline provisions the cluster, installs TSF from the
     `tsf-cli` container image, executes the test workflow, and then
     deprovisions the cluster.
+  results:
+    - name: child-summary-b64
+      description: "Base64-encoded JSON: {run, status, version}"
+      value: $(finally.generate-summary.results.summary-b64)
   params:
     - name: ocp-version
       description: 'The OpenShift version to use for the ephemeral cluster deployment.'
@@ -186,3 +190,28 @@ spec:
           value: $(tasks.status)
         - name: pipelinerun-name
           value: $(context.pipelineRun.name)
+    - name: generate-summary
+      taskSpec:
+        results:
+          - name: summary-b64
+            type: string
+        steps:
+          - name: summary
+            image: quay.io/openshift-pipeline/ci
+            env:
+              - name: OCP_VERSION
+                value: $(params.ocp-version)
+              - name: PIPELINE_RUN_NAME
+                value: $(context.pipelineRun.name)
+              - name: PIPELINE_STATUS
+                value: $(tasks.status)
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+              if [[ "${PIPELINE_STATUS}" == "Succeeded" ]]; then
+                status="Succeeded"
+              else
+                status="Failed"
+              fi
+              payload="{\"run\":\"${PIPELINE_RUN_NAME}\",\"status\":\"${status}\",\"version\":\"${OCP_VERSION}\"}"
+              printf "%s" "${payload}" | base64 | tr -d '\n' > "$(results.summary-b64.path)"
