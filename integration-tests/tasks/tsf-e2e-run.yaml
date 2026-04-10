@@ -37,6 +37,12 @@ spec:
           value: "$(params.tsf-cli-revision)"
         - name: E2E_APPLICATIONS_NAMESPACE
           value: "default-tenant"
+        - name: TSF_APPLICATION_NAME
+          value: "tsf-demo-app"
+        - name: TSF_COMPONENT_NAME
+          value: "tsf-demo-comp"
+        - name: TSF_MANAGED_NAMESPACE
+          value: "default-managed-tenant"
       computeResources:
         requests:
           cpu: "2"
@@ -52,11 +58,14 @@ spec:
         set -o nounset
         set -o pipefail
 
-        # Install oc CLI
+        # Install oc CLI and jq (needed by setup-release.sh)
         # TODO - use image with `oc` already present
         mkdir -p "${HOME}/bin"
         curl -sSfL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz \
           | tar xz -C "${HOME}/bin" oc
+        ln -s "${HOME}/bin/oc" "${HOME}/bin/kubectl"
+        curl -sSfL -o "${HOME}/bin/jq" https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+        chmod +x "${HOME}/bin/jq"
         export PATH="${HOME}/bin:${PATH}"
 
         # Disable in-cluster config so the e2e framework uses the
@@ -78,35 +87,31 @@ spec:
         git fetch origin "${TSF_CLI_REVISION}"
         git checkout FETCH_HEAD
 
-        # WORKAROUND: Patch image-controller to a version that includes
-        # fixes for the namespace robot account infinite reconcile loop.
-        # See: https://github.com/konflux-ci/image-controller/commit/faaa7f3
-        # Once the konflux operator ships a fixed image-controller, remove this block.
-        IC_FIXED_IMAGE="quay.io/konflux-ci/image-controller:faaa7f3"
-        IC_NAMESPACE="image-controller"
-        IC_DEPLOYMENT="image-controller-controller-manager"
-        OPERATOR_NAMESPACE="konflux-operator"
-        OPERATOR_DEPLOYMENT="konflux-operator-controller-manager"
+        # Append random suffix to managed namespace to avoid Quay repo collisions
+        # between concurrent CI runs
+        TSF_MANAGED_NAMESPACE="${TSF_MANAGED_NAMESPACE}-$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 5)"
+        export TSF_MANAGED_NAMESPACE
 
-        echo "--- WORKAROUND: Patching image-controller ---"
-        # Scale down the konflux operator so it stops reverting the image
-        oc scale deployment "${OPERATOR_DEPLOYMENT}" -n "${OPERATOR_NAMESPACE}" --replicas=0
-        oc rollout status deployment "${OPERATOR_DEPLOYMENT}" -n "${OPERATOR_NAMESPACE}" --timeout=60s || true
+        # Build e2e tests in background while setting up release resources
+        echo "--- Starting e2e test build in background ---"
+        (cd e2e && make build) &
+        BUILD_PID=$!
 
-        # Patch the image-controller deployment with the fixed image
-        oc patch deployment "${IC_DEPLOYMENT}" -n "${IC_NAMESPACE}" --type=json \
-          -p="[{\"op\": \"replace\", \"path\": \"/spec/template/spec/containers/0/image\", \"value\": \"${IC_FIXED_IMAGE}\"}]"
+        # Set up release resources before running the tests
+        echo "--- Setting up release resources ---"
+        bash scripts/setup-release.sh \
+          -t "${E2E_APPLICATIONS_NAMESPACE}" \
+          -m "${TSF_MANAGED_NAMESPACE}" \
+          -a "${TSF_APPLICATION_NAME}" \
+          -c "${TSF_COMPONENT_NAME}" \
+          -r "tsf-release"
+        echo "--- Release resources setup complete ---"
 
-        # Wait for the new pod to be running
-        oc rollout status deployment "${IC_DEPLOYMENT}" -n "${IC_NAMESPACE}" --timeout=120s
-        echo "image-controller patched to ${IC_FIXED_IMAGE}"
+        # Wait for the build to finish before running tests
+        echo "--- Waiting for e2e test build to complete ---"
+        wait "${BUILD_PID}"
+        echo "--- Build complete ---"
 
-        # NOTE: Do NOT scale the operator back up here. It would revert
-        # the image-controller patch before the tests reach the critical
-        # ImageRepository provisioning phase.
-        echo "--- WORKAROUND complete (operator left scaled down) ---"
-
-        # Build and run the e2e tests
+        # Run the e2e tests
         cd e2e
-        make build
         ./bin/tsf.test --ginkgo.v --ginkgo.label-filter="tsf-demo"

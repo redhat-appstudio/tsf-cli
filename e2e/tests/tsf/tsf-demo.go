@@ -1,14 +1,12 @@
 package tsf
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
 	buildcontrollers "github.com/konflux-ci/build-service/controllers"
-	tektonutils "github.com/konflux-ci/release-service/tekton/utils"
 
 	"github.com/devfile/library/v2/pkg/util"
 	"github.com/google/go-github/v44/github"
@@ -19,17 +17,12 @@ import (
 	"github.com/konflux-ci/e2e-tests/pkg/utils"
 	"github.com/konflux-ci/e2e-tests/pkg/utils/build"
 	"github.com/konflux-ci/e2e-tests/pkg/utils/tekton"
-	imagecontrollerv1alpha1 "github.com/konflux-ci/image-controller/api/v1alpha1"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
 
 	integrationv1beta2 "github.com/konflux-ci/integration-service/api/v1beta2"
 	releaseApi "github.com/konflux-ci/release-service/api/v1alpha1"
-	releaseMetadata "github.com/konflux-ci/release-service/metadata"
 	tektonapi "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -42,7 +35,6 @@ const (
 	snapshotTimeout             = time.Minute * 4
 	releaseTimeout              = time.Minute * 4
 	releasePipelineTimeout      = time.Minute * 15
-	imageRepositoryReadyTimeout = time.Minute * 5
 	customResourceUpdateTimeout = time.Minute * 10
 
 	// Intervals
@@ -50,13 +42,6 @@ const (
 	snapshotPollingInterval = time.Second * 1
 	releasePollingInterval  = time.Second * 1
 
-	// Release configuration (following setup-release.sh pattern)
-	releasePipelineSAName         = "release-pipeline"
-	ecPolicySourceNS              = "enterprise-contract-service"
-	ecPolicySourceName            = "default"
-	releaseServiceCatalogURL      = "https://github.com/konflux-ci/release-service-catalog.git"
-	releaseServiceCatalogRevision = "production"
-	releasePipelinePath           = "pipelines/managed/push-to-external-registry/push-to-external-registry.yaml"
 )
 
 func tsfDemoSuiteDescribe(args ...interface{}) bool {
@@ -113,21 +98,23 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 			fw, err = framework.NewFramework(utils.GetGeneratedNamespace(tsfTestLabel))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			userNamespace = fw.UserNamespace
-			managedNamespace = userNamespace + "-managed"
 
-			// Application config
-			applicationName = fmt.Sprintf("tsf-app-%s", util.GenerateRandomString(4))
+			// Managed namespace is set up externally (setup-release.sh) and passed via env var
+			managedNamespace = os.Getenv("TSF_MANAGED_NAMESPACE")
+			gomega.Expect(managedNamespace).NotTo(gomega.BeEmpty(), "TSF_MANAGED_NAMESPACE env var is not set")
 
-			// Component config
-			componentName = fmt.Sprintf("tsf-comp-%s", util.GenerateRandomString(4))
+			// Application and component names must match what setup-release.sh was called with
+			applicationName = os.Getenv("TSF_APPLICATION_NAME")
+			gomega.Expect(applicationName).NotTo(gomega.BeEmpty(), "TSF_APPLICATION_NAME env var is not set")
+
+			componentName = os.Getenv("TSF_COMPONENT_NAME")
+			gomega.Expect(componentName).NotTo(gomega.BeEmpty(), "TSF_COMPONENT_NAME env var is not set")
+
 			pacBranchName = fmt.Sprintf("%s%s", constants.PaCPullRequestBranchPrefix, componentName)
 			componentRepositoryName = utils.ExtractGitRepositoryNameFromURL(gitSourceUrl)
 
 			// Get the build pipeline bundle annotation
-			buildPipelineAnnotation = build.GetBuildPipelineBundleAnnotation(constants.DockerBuildOciTA)
-
-			// Set up release infrastructure in managed namespace
-			createTsfReleaseConfig(fw, managedNamespace, userNamespace, applicationName, componentName)
+			buildPipelineAnnotation = build.GetBuildPipelineBundleAnnotation("docker-build-oci-ta-min")
 		})
 
 		// Remove all resources created by the tests
@@ -382,13 +369,24 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 				gomega.Eventually(func() error {
 					pr, err := fw.AsKubeAdmin.ReleaseController.GetPipelineRunInNamespace(managedNamespace, release.Name, release.Namespace)
 					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-					gomega.Expect(tekton.HasPipelineRunFailed(pr)).NotTo(gomega.BeTrue(), fmt.Sprintf("did not expect Release PipelineRun %s/%s to fail", pr.GetNamespace(), pr.GetName()))
+					if tekton.HasPipelineRunFailed(pr) {
+						failLogs, _ := tekton.GetFailedPipelineRunLogs(
+							fw.AsKubeAdmin.CommonController.KubeRest(),
+							fw.AsKubeAdmin.CommonController.KubeInterface(),
+							pr,
+						)
+						ginkgo.GinkgoWriter.Printf("=== FAILED PIPELINE RUN LOGS ===\n%s\n", failLogs)
+						gomega.Expect(true).To(gomega.BeFalse(),
+							fmt.Sprintf("Release PipelineRun %s/%s failed. See diagnostics above.", pr.GetNamespace(), pr.GetName()))
+					}
 					if !pr.IsDone() {
 						return fmt.Errorf("release pipelinerun %s/%s has not finished yet", pr.GetNamespace(), pr.GetName())
 					}
-					gomega.Expect(tekton.HasPipelineRunSucceeded(pr)).To(gomega.BeTrue(), fmt.Sprintf("Release PipelineRun %s/%s did not succeed", pr.GetNamespace(), pr.GetName()))
+					gomega.Expect(tekton.HasPipelineRunSucceeded(pr)).To(gomega.BeTrue(),
+						fmt.Sprintf("Release PipelineRun %s/%s did not succeed", pr.GetNamespace(), pr.GetName()))
 					return nil
-				}, releasePipelineTimeout, constants.PipelineRunPollingInterval).Should(gomega.Succeed(), fmt.Sprintf("release pipelinerun for release %q did not complete successfully", release.Name))
+				}, releasePipelineTimeout, constants.PipelineRunPollingInterval).Should(gomega.Succeed(),
+					fmt.Sprintf("release pipelinerun for release %q did not complete successfully", release.Name))
 			})
 		})
 
@@ -407,206 +405,3 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 	})
 })
 
-// createTsfReleaseConfig sets up release infrastructure in the managed namespace,
-// following the pattern from setup-release.sh.
-func createTsfReleaseConfig(fw *framework.Framework, managedNamespace, userNamespace, applicationName, componentName string) {
-	var err error
-
-	// Step 1: Create managed namespace with tenant label
-	// Not using CreateTestNamespace — it adds ArgoCD/workspace labels and waits for
-	// integration-runner SA, which is not appropriate for a managed namespace.
-	nsObj := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: managedNamespace,
-			Labels: map[string]string{
-				"konflux-ci.dev/type": "tenant",
-			},
-		},
-	}
-	_, err = fw.AsKubeAdmin.CommonController.KubeInterface().CoreV1().Namespaces().Create(
-		context.Background(), nsObj, metav1.CreateOptions{},
-	)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(),
-		"failed to create managed namespace %s", managedNamespace)
-
-	// Step 2: Copy EnterpriseContractPolicy from enterprise-contract-service namespace
-	defaultEcPolicy, err := fw.AsKubeAdmin.TektonController.GetEnterpriseContractPolicy(
-		ecPolicySourceName, ecPolicySourceNS,
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-		"failed to get default ECP from %s/%s", ecPolicySourceNS, ecPolicySourceName)
-
-	_, err = fw.AsKubeAdmin.TektonController.CreateEnterpriseContractPolicy(
-		ecPolicySourceName, managedNamespace, defaultEcPolicy.Spec,
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-		"failed to create ECP in %s", managedNamespace)
-
-	// Step 3: Create RoleBinding for system:authenticated -> ClusterRole/konflux-viewer-user-actions
-	_, err = fw.AsKubeAdmin.CommonController.CreateRoleBinding(
-		"viewer-rolebinding",
-		managedNamespace,
-		"Group",
-		"system:authenticated",
-		"",
-		"ClusterRole",
-		"konflux-viewer-user-actions",
-		"rbac.authorization.k8s.io",
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-		"failed to create viewer rolebinding in %s", managedNamespace)
-
-	// Step 4: Create ImageRepository for trusted-artifacts
-	trustedArtifactsIR := &imagecontrollerv1alpha1.ImageRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "trusted-artifacts",
-			Namespace: managedNamespace,
-		},
-		Spec: imagecontrollerv1alpha1.ImageRepositorySpec{
-			Image: imagecontrollerv1alpha1.ImageParameters{
-				Name:       managedNamespace + "/trusted-artifacts",
-				Visibility: imagecontrollerv1alpha1.ImageVisibilityPublic,
-			},
-		},
-	}
-	err = fw.AsKubeAdmin.CommonController.KubeRest().Create(
-		context.Background(), trustedArtifactsIR,
-	)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(),
-		"failed to create trusted-artifacts ImageRepository")
-
-	// Step 5: Create ImageRepository for the component
-	componentIRName := "release-" + componentName
-	componentIR := &imagecontrollerv1alpha1.ImageRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      componentIRName,
-			Namespace: managedNamespace,
-		},
-		Spec: imagecontrollerv1alpha1.ImageRepositorySpec{
-			Image: imagecontrollerv1alpha1.ImageParameters{
-				Name:       managedNamespace + "/" + componentName,
-				Visibility: imagecontrollerv1alpha1.ImageVisibilityPublic,
-			},
-		},
-	}
-	err = fw.AsKubeAdmin.CommonController.KubeRest().Create(
-		context.Background(), componentIR,
-	)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(),
-		"failed to create component ImageRepository %s", componentIRName)
-
-	// Step 6: Wait for all ImageRepositories to become ready
-	for _, irName := range []string{"trusted-artifacts", componentIRName} {
-		ginkgo.GinkgoWriter.Printf("Waiting for ImageRepository %s/%s to become ready...\n",
-			managedNamespace, irName)
-		gomega.Eventually(func() (imagecontrollerv1alpha1.ImageRepositoryState, error) {
-			ir, err := fw.AsKubeAdmin.ImageController.GetImageRepositoryCR(irName, managedNamespace)
-			if err != nil {
-				return "", err
-			}
-			return ir.Status.State, nil
-		}, imageRepositoryReadyTimeout, defaultPollingInterval).Should(
-			gomega.Equal(imagecontrollerv1alpha1.ImageRepositoryStateReady),
-			fmt.Sprintf("ImageRepository %s/%s did not become ready", managedNamespace, irName),
-		)
-	}
-
-	// Step 7: Fetch dynamic values from ImageRepository status
-	taIR, err := fw.AsKubeAdmin.ImageController.GetImageRepositoryCR("trusted-artifacts", managedNamespace)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	taPushSecretName := taIR.Status.Credentials.PushSecretName
-	taImageURL := taIR.Status.Image.URL
-	ginkgo.GinkgoWriter.Printf("Trusted artifacts: pushSecret=%s, imageURL=%s\n",
-		taPushSecretName, taImageURL)
-
-	compIR, err := fw.AsKubeAdmin.ImageController.GetImageRepositoryCR(componentIRName, managedNamespace)
-	gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-	compPushSecretName := compIR.Status.Credentials.PushSecretName
-	compImageURL := compIR.Status.Image.URL
-	ginkgo.GinkgoWriter.Printf("Component %s: pushSecret=%s, imageURL=%s\n",
-		componentName, compPushSecretName, compImageURL)
-
-	// Step 8: Create release-pipeline ServiceAccount with push secrets
-	releaseSA, err := fw.AsKubeAdmin.CommonController.CreateServiceAccount(
-		releasePipelineSAName, managedNamespace,
-		[]corev1.ObjectReference{
-			{Name: taPushSecretName},
-			{Name: compPushSecretName},
-		}, nil,
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-		"failed to create %s service account", releasePipelineSAName)
-
-	// Step 9: Create RoleBinding for release-pipeline SA -> ClusterRole/release-pipeline-resource-role
-	_, err = fw.AsKubeAdmin.ReleaseController.CreateReleasePipelineRoleBindingForServiceAccount(
-		managedNamespace, releaseSA,
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-		"failed to create release pipeline role binding")
-
-	// Step 10: Create ReleasePlanAdmission with per-component data mapping
-	rpaData, err := json.Marshal(map[string]interface{}{
-		"mapping": map[string]interface{}{
-			"defaults": map[string]interface{}{
-				"pushSourceContainer": false,
-				"tags":                []string{"latest", "{{ git_sha }}"},
-			},
-			"components": []map[string]interface{}{
-				{
-					"name":       componentName,
-					"repository": compImageURL,
-				},
-			},
-		},
-	})
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-	_, err = fw.AsKubeAdmin.ReleaseController.CreateReleasePlanAdmission(
-		"tsf-release",
-		managedNamespace,
-		"",
-		userNamespace,
-		ecPolicySourceName,
-		releasePipelineSAName,
-		[]string{applicationName},
-		false,
-		&tektonutils.PipelineRef{
-			Resolver: "git",
-			Params: []tektonutils.Param{
-				{Name: "url", Value: releaseServiceCatalogURL},
-				{Name: "revision", Value: releaseServiceCatalogRevision},
-				{Name: "pathInRepo", Value: releasePipelinePath},
-			},
-			OciStorage: taImageURL,
-		},
-		&runtime.RawExtension{Raw: rpaData},
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-		"failed to create ReleasePlanAdmission")
-
-	// Step 11: Create ReleasePlan in user namespace with auto-release enabled
-	// Creating directly instead of using CreateReleasePlan helper because the helper
-	// always sets standing-attribution to "true", but setup-release.sh uses "false".
-	releasePlan := &releaseApi.ReleasePlan{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "tsf-release",
-			Namespace: userNamespace,
-			Labels: map[string]string{
-				releaseMetadata.AutoReleaseLabel: "true",
-				releaseMetadata.AttributionLabel: "true",
-			},
-		},
-		Spec: releaseApi.ReleasePlanSpec{
-			Application: applicationName,
-			Target:      managedNamespace,
-		},
-	}
-	err = fw.AsKubeAdmin.CommonController.KubeRest().Create(
-		context.Background(), releasePlan,
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-		"failed to create ReleasePlan")
-
-	ginkgo.GinkgoWriter.Printf("TSF release config created successfully in managed namespace %s\n",
-		managedNamespace)
-}
