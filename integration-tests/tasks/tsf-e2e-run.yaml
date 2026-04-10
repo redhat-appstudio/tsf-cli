@@ -105,6 +105,16 @@ spec:
           -a "${TSF_APPLICATION_NAME}" \
           -c "${TSF_COMPONENT_NAME}" \
           -r "tsf-release"
+
+        # TEMPORARY: Patch RPA to use elenagerman's branch with custom cert support.
+        # Remove this block once https://github.com/elenagerman/release-service-catalog/tree/ta_custom_cert
+        # is merged into the upstream release-service-catalog.
+        oc patch releaseplanadmission tsf-release -n "${TSF_MANAGED_NAMESPACE}" --type=json \
+          -p='[{"op":"replace","path":"/spec/pipeline/pipelineRef/params","value":[
+            {"name":"url","value":"https://github.com/elenagerman/release-service-catalog.git"},
+            {"name":"revision","value":"ta_custom_cert"},
+            {"name":"pathInRepo","value":"pipelines/managed/push-to-external-registry/push-to-external-registry.yaml"}
+          ]}]'
         echo "--- Release resources setup complete ---"
 
         # Wait for the build to finish before running tests
