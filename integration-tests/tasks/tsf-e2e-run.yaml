@@ -106,6 +106,15 @@ spec:
           -c "${TSF_COMPONENT_NAME}" \
           -r "tsf-release" \
           -R development
+
+        # TEMPORARY: Patch RPA to use rhopp's branch with custom CA support.
+        # Remove this block once custom CA support is merged upstream.
+        oc patch releaseplanadmission tsf-release -n "${TSF_MANAGED_NAMESPACE}" --type=json \
+          -p='[{"op":"replace","path":"/spec/pipeline/pipelineRef/params","value":[
+            {"name":"url","value":"https://github.com/rhopp/release-service-catalog.git"},
+            {"name":"revision","value":"rhopp_custom_ca"},
+            {"name":"pathInRepo","value":"pipelines/managed/push-to-external-registry/push-to-external-registry.yaml"}
+          ]}]'
         echo "--- Release resources setup complete ---"
 
         # Wait for the build to finish before running tests
