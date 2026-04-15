@@ -30,6 +30,10 @@ Options:
                             enterprise-contract-service namespace (default: default)
   -r, --release-name        Name for the ReleasePlan and ReleasePlanAdmission
                             resources (default: local-release)
+  -R, --catalog-revision    Release service catalog git revision (default: production)
+  -I, --image-name-prefix   Prefix for Quay image repository names. Must be unique
+                            across concurrent CI runs to avoid credential collisions.
+                            (default: auto-generated from managed namespace + random suffix)
   -h, --help                Show this help message
 
 Examples:
@@ -78,6 +82,8 @@ APPLICATION="sample-component"
 PRODUCT_VERSION="0.1"
 CONFORMA_POLICY="default"
 RELEASE_NAME="local-release"
+CATALOG_REVISION="production"
+IMAGE_NAME_PREFIX=""
 COMPONENTS=()
 
 while [[ $# -gt 0 ]]; do
@@ -114,6 +120,14 @@ while [[ $# -gt 0 ]]; do
             RELEASE_NAME="$2"
             shift 2
             ;;
+        -R|--catalog-revision)
+            CATALOG_REVISION="$2"
+            shift 2
+            ;;
+        -I|--image-name-prefix)
+            IMAGE_NAME_PREFIX="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             ;;
@@ -126,6 +140,18 @@ done
 
 # Parse PRODUCT_NAME default value based on APPLICATION value (after args parsing)
 PRODUCT_NAME=${PRODUCT_NAME:-$APPLICATION}
+
+# Generate a unique image name prefix to avoid credential collisions between
+# concurrent CI runs that share the same Quay organization.
+if [[ -z "${IMAGE_NAME_PREFIX}" ]]; then
+    RANDOM_SUFFIX=$(od -An -tx1 -N3 /dev/urandom | tr -d ' ')
+    IMAGE_NAME_PREFIX="${MANAGED_NS}-${RANDOM_SUFFIX}"
+fi
+
+IS_OPENSHIFT=false
+if kubectl api-resources --api-group=config.openshift.io &>/dev/null; then
+    IS_OPENSHIFT=true
+fi
 
 # Auto-detect components if none specified
 if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
@@ -151,6 +177,8 @@ echo "   Product Name:      ${PRODUCT_NAME}"
 echo "   Product Version:   ${PRODUCT_VERSION}"
 echo "   EC policy:         ${CONFORMA_POLICY}"
 echo "   Release name:      ${RELEASE_NAME}"
+echo "   Catalog revision:  ${CATALOG_REVISION}"
+echo "   Image name prefix: ${IMAGE_NAME_PREFIX}"
 echo "   Components:        ${COMPONENTS[*]}"
 echo ""
 
@@ -165,13 +193,28 @@ metadata:
     konflux-ci.dev/type: tenant
 EOF
 
-# Step 2: Copy EnterpriseContractPolicy from enterprise-contract-service namespace
+# Step 2: On OpenShift, create a ConfigMap to inject the cluster-wide trusted CA bundle
+if [[ "${IS_OPENSHIFT}" == "true" ]]; then
+    echo "🔒 OpenShift detected — creating trusted-ca ConfigMap in '${MANAGED_NS}'..."
+    kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trusted-ca
+  namespace: ${MANAGED_NS}
+  labels:
+    config.openshift.io/inject-trusted-cabundle: "true"
+data: {}
+EOF
+fi
+
+# Step 3: Copy EnterpriseContractPolicy from enterprise-contract-service namespace
 echo "📜 Copying EnterpriseContractPolicy '${CONFORMA_POLICY}' from enterprise-contract-service namespace..."
 kubectl get enterprisecontractpolicy "${CONFORMA_POLICY}" -n enterprise-contract-service -o json \
     | jq 'del(.metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.generation, .metadata.managedFields, .metadata.ownerReferences, .status) | .metadata.namespace = "'"${MANAGED_NS}"'"' \
     | kubectl apply -f -
 
-# Step 3: Create RoleBinding for authenticated users
+# Step 4: Create RoleBinding for authenticated users
 echo "🔗 Creating RoleBinding for authenticated users..."
 kubectl apply -f - <<EOF
 apiVersion: rbac.authorization.k8s.io/v1
@@ -189,7 +232,7 @@ subjects:
     apiGroup: rbac.authorization.k8s.io
 EOF
 
-# Step 4: Create ImageRepository for trusted-artifacts
+# Step 5: Create ImageRepository for trusted-artifacts
 echo "🖼️  Creating ImageRepository for trusted-artifacts..."
 kubectl apply -f - <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
@@ -199,11 +242,11 @@ metadata:
   namespace: ${MANAGED_NS}
 spec:
   image:
-    name: ${MANAGED_NS}/trusted-artifacts
+    name: ${IMAGE_NAME_PREFIX}/trusted-artifacts
     visibility: public
 EOF
 
-# Step 5: Create ImageRepository for each component
+# Step 6: Create ImageRepository for each component
 for COMPONENT in "${COMPONENTS[@]}"; do
     echo "🖼️  Creating ImageRepository for component '${COMPONENT}'..."
     kubectl apply -f - <<EOF
@@ -214,12 +257,12 @@ metadata:
   namespace: ${MANAGED_NS}
 spec:
   image:
-    name: ${MANAGED_NS}/${COMPONENT}
+    name: ${IMAGE_NAME_PREFIX}/${COMPONENT}
     visibility: public
 EOF
 done
 
-# Step 6: Wait for all ImageRepositories to become ready
+# Step 7: Wait for all ImageRepositories to become ready
 echo ""
 echo "⏳ Waiting for ImageRepositories to become ready (timeout: ${WAIT_TIMEOUT}s)..."
 
@@ -231,7 +274,7 @@ for repo in "${ALL_REPOS[@]}"; do
     echo "   ✅ '${repo}' is ready"
 done
 
-# Step 7: Fetch dynamic values from ImageRepository status
+# Step 8: Fetch dynamic values from ImageRepository status
 echo ""
 echo "📡 Fetching image URLs and push secrets from ImageRepository status..."
 
@@ -254,7 +297,7 @@ for COMPONENT in "${COMPONENTS[@]}"; do
     echo "     Image URL:   ${COMP_IMAGE_URLS["${COMPONENT}"]}"
 done
 
-# Step 8: Create release-pipeline ServiceAccount with push secrets
+# Step 9: Create release-pipeline ServiceAccount with push secrets
 echo ""
 echo "👤 Creating release-pipeline ServiceAccount..."
 
@@ -275,7 +318,7 @@ secrets:
 ${SECRETS_YAML}
 EOF
 
-# Step 9: Create RoleBinding for release-pipeline ServiceAccount
+# Step 10: Create RoleBinding for release-pipeline ServiceAccount
 echo "🔗 Creating RoleBinding for release-pipeline ServiceAccount..."
 kubectl apply -f - <<EOF
 apiVersion: rbac.authorization.k8s.io/v1
@@ -293,7 +336,7 @@ subjects:
     namespace: ${MANAGED_NS}
 EOF
 
-# Step 10: Copy SSO credentials from tpa-realm-clients secret in tsf namespace
+# Step 11: Copy SSO credentials from tpa-realm-clients secret in tsf namespace
 SSO_SECRET_CREATED=false
 SSO_ACCOUNT=release
 SSO_TOKEN=$(kubectl get secret tpa-realm-clients -n tsf \
@@ -318,7 +361,7 @@ if [ "$SSO_SECRET_CREATED" == false ]; then
     echo "⚠️ Secret 'tpa-realm-client' in namespace 'tsf' not found, skipping SSO credentials creation"
 fi
 
-# Step 11: Create ReleasePlanAdmission
+# Step 12: Create ReleasePlanAdmission
 echo "📋 Creating ReleasePlanAdmission..."
 
 # Build the components mapping YAML
@@ -362,13 +405,23 @@ spec:
         - name: url
           value: "https://github.com/konflux-ci/release-service-catalog.git"
         - name: revision
-          value: production
+          value: ${CATALOG_REVISION}
         - name: pathInRepo
           value: "pipelines/managed/push-to-external-registry/push-to-external-registry.yaml"
     serviceAccountName: release-pipeline
+    taskRunSpecs:
+      - pipelineTaskName: push-snapshot
+        stepSpecs:
+          - name: push-snapshot
+            computeResources:
+              requests:
+                cpu: 10m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
 EOF
 
-# Step 12: Create ReleasePlan in tenant namespace
+# Step 13: Create ReleasePlan in tenant namespace
 echo "📋 Creating ReleasePlan in tenant namespace '${TENANT_NS}'..."
 kubectl apply -f - <<EOF
 apiVersion: appstudio.redhat.com/v1alpha1
@@ -389,6 +442,9 @@ echo "✅ Release setup completed successfully!"
 echo ""
 echo "Resources created in managed namespace '${MANAGED_NS}':"
 echo "  - Namespace: ${MANAGED_NS} (with label konflux-ci.dev/type: tenant)"
+if [[ "${IS_OPENSHIFT}" == "true" ]]; then
+    echo "  - ConfigMap: trusted-ca (OpenShift trusted CA bundle injection)"
+fi
 echo "  - EnterpriseContractPolicy: ${CONFORMA_POLICY}"
 echo "  - RoleBinding: authenticated-konflux-viewer -> ClusterRole/konflux-viewer-user-actions"
 echo "  - ImageRepository: trusted-artifacts"
