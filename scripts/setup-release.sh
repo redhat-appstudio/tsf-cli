@@ -193,6 +193,21 @@ metadata:
     konflux-ci.dev/type: tenant
 EOF
 
+# Step 2: On OpenShift, create a ConfigMap to inject the cluster-wide trusted CA bundle
+if [[ "${IS_OPENSHIFT}" == "true" ]]; then
+    echo "🔒 OpenShift detected — creating trusted-ca ConfigMap in '${MANAGED_NS}'..."
+    kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trusted-ca
+  namespace: ${MANAGED_NS}
+  labels:
+    config.openshift.io/inject-trusted-cabundle: "true"
+data: {}
+EOF
+fi
+
 # Step 3: Copy EnterpriseContractPolicy from enterprise-contract-service namespace
 echo "📜 Copying EnterpriseContractPolicy '${CONFORMA_POLICY}' from enterprise-contract-service namespace..."
 kubectl get enterprisecontractpolicy "${CONFORMA_POLICY}" -n enterprise-contract-service -o json \
