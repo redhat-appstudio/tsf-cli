@@ -38,6 +38,7 @@ oc delete secret tsf-quay-integration -n tsf
 [source,bash]
 ----
 tsf integration quay \
+  --verbose \
   --organization="$QUAY__ORG" \
   --token="$QUAY__API_TOKEN" \
   --url="$QUAY__URL"

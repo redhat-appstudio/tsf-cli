@@ -130,7 +130,11 @@ Create and install a GitHub App that enables {TSFShortName} to interact with you
 +
 [source,bash]
 ----
-tsf integration github --create --org "$GITHUB__ORG" "<my_github_app_name>"
+tsf integration github \
+  --verbose \
+  --create \
+  --org "$GITHUB__ORG" \
+  "<my_github_app_name>"
 ----
 +
 The command outputs a URL starting with `\http://localhost:8228`.
@@ -175,6 +179,7 @@ If you are using GitLab instead of GitHub, configure the GitLab integration. The
 [source,bash]
 ----
 tsf integration gitlab \
+  --verbose \
   --group="$GITLAB__GROUP" \
   --host="$GITLAB__HOST" \
   --token="$GITLAB__TOKEN"
@@ -206,6 +211,7 @@ Configure the Quay registry integration so that {TSFShortName} can push built co
 [source,bash]
 ----
 tsf integration quay \
+  --verbose \
   --organization="$QUAY__ORG" \
   --token="$QUAY__API_TOKEN" \
   --url="$QUAY__URL"
