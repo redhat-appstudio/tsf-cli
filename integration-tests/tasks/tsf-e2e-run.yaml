@@ -35,14 +35,6 @@ spec:
           value: "$(params.tsf-cli-repo-url)"
         - name: TSF_CLI_REVISION
           value: "$(params.tsf-cli-revision)"
-        - name: E2E_APPLICATIONS_NAMESPACE
-          value: "default-tenant"
-        - name: TSF_APPLICATION_NAME
-          value: "tsf-demo-app"
-        - name: TSF_COMPONENT_NAME
-          value: "tsf-demo-comp"
-        - name: TSF_MANAGED_NAMESPACE
-          value: "default-managed-tenant"
       computeResources:
         requests:
           cpu: "2"
@@ -87,10 +79,12 @@ spec:
         git fetch origin "${TSF_CLI_REVISION}"
         git checkout FETCH_HEAD
 
-        # Append random suffix to managed namespace to avoid Quay repo collisions
-        # between concurrent CI runs
-        TSF_MANAGED_NAMESPACE="${TSF_MANAGED_NAMESPACE}-$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 5)"
-        export TSF_MANAGED_NAMESPACE
+        # E2E test configuration
+        # Random suffixes avoid collisions between concurrent CI runs
+        export E2E_APPLICATIONS_NAMESPACE="default-tenant"
+        export TSF_APPLICATION_NAME="tsf-app"
+        export TSF_MANAGED_NAMESPACE="managed-tenant-$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 5)"
+        export TSF_COMPONENT_NAME="tsf-comp-$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 5)"
 
         # Build e2e tests in background while setting up release resources
         echo "--- Starting e2e test build in background ---"
