@@ -204,10 +204,6 @@ spec:
           }
 
           deploy_cluster
-
-          # TEMP: force timeout to verify deprovision still runs
-          echo "INFO: Sleeping to force timeout..."
-          sleep 7200
         }
         main 2>&1 | tee cluster-provision.log
     - name: secure-push-oci
