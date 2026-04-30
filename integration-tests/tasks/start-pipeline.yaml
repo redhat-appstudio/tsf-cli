@@ -152,6 +152,21 @@ spec:
         pipeline_url="https://raw.githubusercontent.com/${URL_ORG}/${URL_REPOSITORY}/${GIT_REVISION}/integration-tests/pipelines/tsf-cli-e2e.yaml"
         echo "Starting tsf-cli-e2e pipeline from ${pipeline_url} for OCP version ${OCP_VERSION}"
 
+        # Create volumeClaimTemplate for the shared-data workspace used to pass
+        # ocp-login-command from provision to finally tasks.
+        cat > /tmp/vct-shared-data.json << 'VCTEOF'
+        {
+          "spec": {
+            "accessModes": ["ReadWriteOnce"],
+            "resources": {
+              "requests": {
+                "storage": "10Mi"
+              }
+            }
+          }
+        }
+        VCTEOF
+
         # Required child params and static pipeline labels.
         tkn_params=(
           "--param" "ocp-version=${OCP_VERSION}"
@@ -177,6 +192,7 @@ spec:
           "-o" "name"
           "--serviceaccount" "konflux-integration-runner"
           "--pipeline-timeout" "2h0m"
+          "--workspace" "name=shared-data,volumeClaimTemplateFile=/tmp/vct-shared-data.json"
         )
 
         # Keep child pipeline default image unless job-spec provides one.
