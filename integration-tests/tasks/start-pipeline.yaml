@@ -154,17 +154,13 @@ spec:
 
         # Create volumeClaimTemplate for the shared-data workspace used to pass
         # ocp-login-command from provision to finally tasks.
-        cat > /tmp/vct-shared-data.json << 'VCTEOF'
-        {
-          "spec": {
-            "accessModes": ["ReadWriteOnce"],
-            "resources": {
-              "requests": {
-                "storage": "10Mi"
-              }
-            }
-          }
-        }
+        cat > /tmp/vct-shared-data.yaml << 'VCTEOF'
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Mi
         VCTEOF
 
         # Required child params and static pipeline labels.
@@ -192,7 +188,7 @@ spec:
           "-o" "name"
           "--serviceaccount" "konflux-integration-runner"
           "--pipeline-timeout" "2h0m"
-          "--workspace" "name=shared-data,volumeClaimTemplateFile=/tmp/vct-shared-data.json"
+          "--workspace" "name=shared-data,volumeClaimTemplateFile=/tmp/vct-shared-data.yaml"
         )
 
         # Keep child pipeline default image unless job-spec provides one.
