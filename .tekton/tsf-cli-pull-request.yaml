@@ -320,12 +320,7 @@ spec:
         operator: in
         values:
         - "false"
-    - name: clair-scan
-      matrix:
-        params:
-        - name: image-platform
-          value:
-          - $(params.build-platforms[*])
+    - name: tpa-scan
       params:
       - name: image-digest
         value: $(tasks.build-image-index.results.IMAGE_DIGEST)
@@ -336,9 +331,9 @@ spec:
       taskRef:
         params:
         - name: name
-          value: clair-scan
+          value: tpa-scan
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-clair-scan:0.3@sha256:1f19b5f4d706b97426f11ac40ffc0a1eeb1a54b37d2c16395799e7456252e7a8
+          value: quay.io/konflux-ci/tekton-catalog/task-tpa-scan:0.1@sha256:68b6e188f742da92af9c40a794fd021a65d49b419d1e36096277b2d9ebbe1afc
         - name: kind
           value: task
         resolver: bundles
