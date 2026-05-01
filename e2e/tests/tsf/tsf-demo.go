@@ -114,7 +114,7 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 			componentRepositoryName = utils.ExtractGitRepositoryNameFromURL(gitSourceUrl)
 
 			// Get the build pipeline bundle annotation
-			buildPipelineAnnotation = build.GetBuildPipelineBundleAnnotation("docker-build-oci-ta-min")
+			buildPipelineAnnotation = build.GetBuildPipelineBundleAnnotation(constants.DockerBuildOciTAMin)
 		})
 
 		// Remove all resources created by the tests
@@ -279,7 +279,7 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 			ginkgo.It("should validate Tekton TaskRun test results successfully", func() {
 				pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRun(component.GetName(), applicationName, userNamespace, headSHA)
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-				gomega.Expect(build.ValidateBuildPipelineTestResults(pipelineRun, fw.AsKubeAdmin.CommonController.KubeRest(), false)).To(gomega.Succeed())
+				gomega.Expect(build.ValidateBuildPipelineTestResults(pipelineRun, fw.AsKubeAdmin.CommonController.KubeRest(), false, true)).To(gomega.Succeed())
 			})
 
 			ginkgo.It("should validate that the build pipelineRun is signed", func() {
