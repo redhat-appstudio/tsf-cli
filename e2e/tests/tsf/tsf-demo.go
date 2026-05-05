@@ -9,7 +9,6 @@ import (
 	buildcontrollers "github.com/konflux-ci/build-service/controllers"
 
 	"github.com/devfile/library/v2/pkg/util"
-	"github.com/google/go-github/v44/github"
 	appservice "github.com/konflux-ci/application-api/api/v1alpha1"
 	"github.com/konflux-ci/e2e-tests/pkg/clients/has"
 	"github.com/konflux-ci/e2e-tests/pkg/constants"
@@ -20,13 +19,17 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
 
+	"github.com/redhat-appstudio/tsf-cli/e2e/tests/tsf/git-providers"
+
 	integrationv1beta2 "github.com/konflux-ci/integration-service/api/v1beta2"
 	releaseApi "github.com/konflux-ci/release-service/api/v1alpha1"
 	tektonapi "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 const (
-	tsfTestLabel = "tsf-demo"
+	tsfTestLabel       = "tsf-demo"
+	tsfReleasePlanName = "tsf-release"
 
 	// Timeouts
 	mergePRTimeout              = time.Minute * 1
@@ -42,6 +45,8 @@ const (
 	snapshotPollingInterval = time.Second * 1
 	releasePollingInterval  = time.Second * 1
 
+	// GitLab: after the component exists, allow controllers/webhooks to settle before PaC init MR work.
+	gitlabPostComponentWaitBeforeInitMR = 10 * time.Second
 )
 
 func tsfDemoSuiteDescribe(args ...interface{}) bool {
@@ -68,14 +73,17 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 	var release *releaseApi.Release
 
 	// PaC related variables
-	var prNumber int
+	var pacChangeID int
 	var headSHA, pacBranchName string
-	var mergeResult *github.PullRequestMergeResult
 
 	// Component configuration - using a simple test repository
 	var gitSourceUrl string
+	var gitSourceRevision string
+	var scmDefaultBranchName string
+	var scmProvider gitproviders.Provider
+	var providerKind gitproviders.Kind
+
 	const (
-		gitSourceRevision          = "1255dc36534b9db7b99efbc281117435ea03255f"
 		gitSourceDefaultBranchName = "main"
 		dockerFilePath             = "Dockerfile"
 
@@ -88,12 +96,16 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 	ginkgo.Describe("TSF Demo", ginkgo.Ordered, func() {
 		ginkgo.BeforeAll(func() {
 			if os.Getenv(constants.SKIP_PAC_TESTS_ENV) == "true" {
-				ginkgo.Skip("Skipping this test due to configuration issue with Spray proxy")
+				ginkgo.Skip("Skipping this test (SKIP_PAC_TESTS=true)")
 			}
 
-			githubOrg := os.Getenv("MY_GITHUB_ORG")
-			gomega.Expect(githubOrg).NotTo(gomega.BeEmpty(), "MY_GITHUB_ORG env var is not set")
-			gitSourceUrl = fmt.Sprintf("https://github.com/%s/testrepo", githubOrg)
+			providerRaw := os.Getenv(gitproviders.EnvGitProvider)
+			providerKind, err = gitproviders.ParseGitProvider(providerRaw)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+				"fix GIT_PROVIDER so the test does not silently use GitHub (want github, gitlab, or gl)")
+			if providerKind == gitproviders.KindGitLab {
+				gitproviders.PrepareProcessEnvForGitLab()
+			}
 
 			fw, err = framework.NewFramework(utils.GetGeneratedNamespace(tsfTestLabel))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -110,8 +122,59 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 			componentName = os.Getenv("TSF_COMPONENT_NAME")
 			gomega.Expect(componentName).NotTo(gomega.BeEmpty(), "TSF_COMPONENT_NAME env var is not set")
 
+			switch providerKind {
+			case gitproviders.KindGitHub:
+				githubOrg := os.Getenv("MY_GITHUB_ORG")
+				gomega.Expect(githubOrg).NotTo(gomega.BeEmpty(), "MY_GITHUB_ORG env var is not set")
+				repo := gitproviders.RequiredGithubRepo()
+				gitSourceUrl = gitproviders.GithubComponentURL(githubOrg, repo)
+				gitSourceRevision = gitproviders.GithubSourceRevision()
+				scmDefaultBranchName = gitSourceDefaultBranchName
+				componentRepositoryName = utils.ExtractGitRepositoryNameFromURL(gitSourceUrl)
+				gomega.Expect(gitSourceUrl).To(gomega.ContainSubstring("github.com"),
+					"GIT_PROVIDER=github but component URL does not look like GitHub")
+			case gitproviders.KindGitLab:
+				path, errPath := gitproviders.RequiredGitlabProjectPath()
+				gomega.Expect(errPath).NotTo(gomega.HaveOccurred())
+				gitSourceUrl = gitproviders.GitlabComponentURL(gitproviders.GitlabBaseURL(), path)
+				gitSourceRevision = gitproviders.GitlabSourceRevision()
+				scmDefaultBranchName = gitproviders.GitlabDefaultBranch()
+				componentRepositoryName = path
+				gomega.Expect(gitSourceUrl).NotTo(gomega.ContainSubstring("github.com"),
+					"GIT_PROVIDER=gitlab but component URL looks like GitHub — check MY_GITLAB_PROJECT_PATH and GITLAB_BASE_URL")
+				gomega.Expect(gitSourceUrl).To(gomega.HavePrefix(gitproviders.GitlabBaseURL()),
+					"internal: GitLab clone URL must start with GITLAB_BASE_URL")
+				ginkgo.GinkgoWriter.Printf("GitLab: project=%q defaultBranch=%q sourceRevision=%q (empty revision => branch from tip of default)\n",
+					path, scmDefaultBranchName, gitSourceRevision)
+			}
+
+			ginkgo.GinkgoWriter.Printf("\n======== tsf-demo SCM (API + component clone target) ========\n")
+			ginkgo.GinkgoWriter.Printf("%s=%q -> kind=%s\n", gitproviders.EnvGitProvider, providerRaw, providerKind)
+			ginkgo.GinkgoWriter.Printf("componentRepositoryName (API key)=%q\n", componentRepositoryName)
+			ginkgo.GinkgoWriter.Printf("component GitSource.URL=%q\n", gitSourceUrl)
+			ginkgo.GinkgoWriter.Printf("==============================================================\n\n")
+
+			scmProvider, err = gitproviders.New(providerKind, fw, componentRepositoryName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// GitLab PaC needs an SCM credential secret (password + provider.token) before the component exists;
+			// webhook.secret is synced once Konflux writes pipelines-as-code-webhooks-secret (same PaC init spec as GitHub’s PR poll).
+			if providerKind == gitproviders.KindGitLab {
+				gitlabToken := utils.GetEnv(constants.GITLAB_BOT_TOKEN_ENV, "")
+				gomega.Expect(gitlabToken).NotTo(gomega.BeEmpty(),
+					"set GITLAB_BOT_TOKEN or GITLAB_TOKEN so PaC can push the init branch and open a merge request")
+				const pacGitlabSecret = "pipelines-as-code-secret"
+				_, getErr := fw.AsKubeAdmin.CommonController.GetSecret(userNamespace, pacGitlabSecret)
+				if apierrors.IsNotFound(getErr) {
+					gomega.Expect(gitproviders.CreateGitlabPACSecret(fw, pacGitlabSecret, gitlabToken)).To(gomega.Succeed(),
+						"create pipelines-as-code-secret for GitLab; scm.host matches GITLAB_BASE_URL host")
+				} else {
+					gomega.Expect(getErr).NotTo(gomega.HaveOccurred())
+					ginkgo.GinkgoWriter.Printf("reusing existing secret %s/%s for GitLab PaC\n", userNamespace, pacGitlabSecret)
+				}
+			}
+
 			pacBranchName = fmt.Sprintf("%s%s", constants.PaCPullRequestBranchPrefix, componentName)
-			componentRepositoryName = utils.ExtractGitRepositoryNameFromURL(gitSourceUrl)
 
 			// Get the build pipeline bundle annotation
 			buildPipelineAnnotation = build.GetBuildPipelineBundleAnnotation("docker-build-oci-ta-min")
@@ -120,20 +183,19 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 		// Remove all resources created by the tests
 		ginkgo.AfterAll(func() {
 			if !(os.Getenv("E2E_SKIP_CLEANUP") == "true") && !ginkgo.CurrentSpecReport().Failed() {
-				gomega.Expect(fw.AsKubeAdmin.ReleaseController.DeleteReleasePlan("tsf-release", userNamespace, false)).To(gomega.Succeed())
+				gomega.Expect(fw.AsKubeAdmin.ReleaseController.DeleteReleasePlan(tsfReleasePlanName, userNamespace, false)).To(gomega.Succeed())
 				gomega.Expect(fw.AsKubeAdmin.HasController.DeleteApplication(applicationName, userNamespace, false)).To(gomega.Succeed())
 				gomega.Expect(fw.AsKubeAdmin.CommonController.DeleteNamespace(managedNamespace)).To(gomega.Succeed())
 
 				// Delete new branch created by PaC and a testing branch used as a component's base branch
-				err = fw.AsKubeAdmin.CommonController.Github.DeleteRef(componentRepositoryName, pacBranchName)
-				if err != nil {
-					gomega.Expect(err.Error()).To(gomega.ContainSubstring("Reference does not exist"))
+				gomega.Expect(scmProvider.DeleteRemoteBranch(pacBranchName)).To(gomega.Succeed())
+				gomega.Expect(scmProvider.DeleteRemoteBranch(componentNewBaseBranch)).To(gomega.Succeed())
+				if providerKind == gitproviders.KindGitLab {
+					gomega.Expect(gitproviders.DeleteAllGitlabProjectWebhooks(fw, componentRepositoryName)).To(gomega.Succeed(),
+						"remove all GitLab project webhooks left by PaC/Konflux or prior runs")
+				} else {
+					gomega.Expect(scmProvider.CleanupClusterWebhooks()).ShouldNot(gomega.HaveOccurred())
 				}
-				err = fw.AsKubeAdmin.CommonController.Github.DeleteRef(componentRepositoryName, componentNewBaseBranch)
-				if err != nil {
-					gomega.Expect(err.Error()).To(gomega.ContainSubstring("Reference does not exist"))
-				}
-				gomega.Expect(build.CleanupWebhooks(fw, componentRepositoryName)).ShouldNot(gomega.HaveOccurred())
 			}
 		})
 
@@ -160,7 +222,7 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 			// can avoid polluting the default (main) branch
 			componentNewBaseBranch = fmt.Sprintf("base-%s", util.GenerateRandomString(6))
 			gitRevision = componentNewBaseBranch
-			gomega.Expect(fw.AsKubeAdmin.CommonController.Github.CreateRef(componentRepositoryName, gitSourceDefaultBranchName, gitSourceRevision, componentNewBaseBranch)).To(gomega.Succeed())
+			gomega.Expect(scmProvider.CreateBaseBranch(scmDefaultBranchName, gitSourceRevision, componentNewBaseBranch)).To(gomega.Succeed())
 		})
 
 		// Component is imported from gitUrl
@@ -184,24 +246,31 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 		})
 
 		ginkgo.When("Component is created", ginkgo.Label(tsfTestLabel), func() {
-			ginkgo.It("triggers creation of a PR in the sample repo", func() {
-				var prSHA string
+			ginkgo.It("triggers creation of a PaC pull request or merge request in the sample repo", func() {
+				// GitHub: PaC uses cluster/GitHub app credentials; no extra secret sync in this test.
+				// GitLab: Konflux writes pipelines-as-code-webhooks-secret after reconcile; PaC needs
+				// webhook.secret on pipelines-as-code-secret before GitLab accepts hooks—poll like the PR/MR wait below.
+				if providerKind == gitproviders.KindGitLab {
+					ginkgo.GinkgoWriter.Printf("GitLab: waiting %s after component create before PaC webhook sync and init MR polling\n", gitlabPostComponentWaitBeforeInitMR)
+					time.Sleep(gitlabPostComponentWaitBeforeInitMR)
+					gitlabToken := utils.GetEnv(constants.GITLAB_BOT_TOKEN_ENV, "")
+					const pacGitlabSecret = "pipelines-as-code-secret"
+					gomega.Eventually(func() error {
+						return gitproviders.EnsureGitlabPACSecretShape(fw, pacGitlabSecret, gitlabToken, gitSourceUrl)
+					}, time.Minute*3, defaultPollingInterval).Should(gomega.Succeed(),
+						"wait for Konflux to populate pipelines-as-code-webhooks-secret, then copy webhook material into pipelines-as-code-secret")
+				}
+				var initHeadSHA string
 				gomega.Eventually(func() error {
-					prs, err := fw.AsKubeAdmin.CommonController.Github.ListPullRequests(componentRepositoryName)
-					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-					for _, pr := range prs {
-						if pr.Head.GetRef() == pacBranchName {
-							prNumber = pr.GetNumber()
-							prSHA = pr.GetHead().GetSHA()
-							return nil
-						}
-					}
-					return fmt.Errorf("could not get the expected PaC branch name %s", pacBranchName)
-				}, pullRequestCreationTimeout, defaultPollingInterval).Should(gomega.Succeed(), fmt.Sprintf("timed out when waiting for init PaC PR (branch %q) to be created against the %q repo", pacBranchName, componentRepositoryName))
+					var err error
+					pacChangeID, initHeadSHA, err = scmProvider.WaitPaCInitChange(pacBranchName)
+					return err
+				}, pullRequestCreationTimeout, defaultPollingInterval).Should(gomega.Succeed(), fmt.Sprintf("timed out when waiting for init PaC change (branch %q) in %q", pacBranchName, componentRepositoryName))
 
 				// We don't need the PipelineRun from a PaC 'pull-request' event to finish, so we can delete it
 				gomega.Eventually(func() error {
-					pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRun(component.GetName(), applicationName, userNamespace, prSHA)
+					pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRunWithType(
+						component.GetName(), applicationName, userNamespace, "", initHeadSHA, gitproviders.PaCEventTypePullRequest(providerKind))
 					if err == nil {
 						gomega.Expect(fw.AsKubeAdmin.TektonController.DeletePipelineRun(pipelineRun.Name, pipelineRun.Namespace)).To(gomega.Succeed())
 						return nil
@@ -241,14 +310,14 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 
 			ginkgo.It("should eventually lead to triggering a 'push' event type PipelineRun after merging the PaC init branch ", func() {
 				gomega.Eventually(func() error {
-					mergeResult, err = fw.AsKubeAdmin.CommonController.Github.MergePullRequest(componentRepositoryName, prNumber)
-					return err
-				}, mergePRTimeout).ShouldNot(gomega.HaveOccurred(), fmt.Sprintf("error when merging PaC pull request: %+v\n", err))
-
-				headSHA = mergeResult.GetSHA()
+					var mergeErr error
+					headSHA, mergeErr = scmProvider.MergePaCChange(pacChangeID)
+					return mergeErr
+				}, mergePRTimeout).ShouldNot(gomega.HaveOccurred(), fmt.Sprintf("error when merging PaC change #%d", pacChangeID))
 
 				gomega.Eventually(func() error {
-					pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRun(component.GetName(), applicationName, userNamespace, headSHA)
+					pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRunWithType(
+						component.GetName(), applicationName, userNamespace, "build", headSHA, gitproviders.PaCEventTypePush(providerKind))
 					if err != nil {
 						ginkgo.GinkgoWriter.Printf("PipelineRun has not been created yet for component %s/%s\n", userNamespace, component.GetName())
 						return err
@@ -257,7 +326,7 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 						return fmt.Errorf("pipelinerun %s/%s hasn't started yet", pipelineRun.GetNamespace(), pipelineRun.GetName())
 					}
 					return nil
-				}, pipelineRunStartedTimeout, constants.PipelineRunPollingInterval).Should(gomega.Succeed(), fmt.Sprintf("timed out when waiting for a PipelineRun in namespace %q with label component label %q and application label %q and sha label %q to start", userNamespace, component.GetName(), applicationName, headSHA))
+				}, pipelineRunStartedTimeout, constants.PipelineRunPollingInterval).Should(gomega.Succeed(), fmt.Sprintf("timed out when waiting for a `push` PaC PipelineRun in namespace %q for component %q application %q sha %q", userNamespace, component.GetName(), applicationName, headSHA))
 			})
 		})
 
@@ -266,7 +335,7 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 				gomega.Expect(pipelineRun.Annotations["appstudio.openshift.io/snapshot"]).To(gomega.Equal(""))
 			})
 			ginkgo.It("should eventually complete successfully", func() {
-				gomega.Expect(fw.AsKubeAdmin.HasController.WaitForComponentPipelineToBeFinished(component, "build", headSHA, "",
+				gomega.Expect(fw.AsKubeAdmin.HasController.WaitForComponentPipelineToBeFinished(component, "build", headSHA, gitproviders.PaCEventTypePush(providerKind),
 					fw.AsKubeAdmin.TektonController, &has.RetryOptions{Retries: 5, Always: true}, pipelineRun)).To(gomega.Succeed())
 
 				// in case the first pipelineRun attempt has failed and was retried, we need to update the git branch head ref
@@ -277,14 +346,16 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 		ginkgo.When("Build PipelineRun completes successfully", ginkgo.Label(tsfTestLabel), func() {
 
 			ginkgo.It("should validate Tekton TaskRun test results successfully", func() {
-				pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRun(component.GetName(), applicationName, userNamespace, headSHA)
+				pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRunWithType(
+					component.GetName(), applicationName, userNamespace, "build", headSHA, gitproviders.PaCEventTypePush(providerKind))
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 				gomega.Expect(build.ValidateBuildPipelineTestResults(pipelineRun, fw.AsKubeAdmin.CommonController.KubeRest(), false)).To(gomega.Succeed())
 			})
 
 			ginkgo.It("should validate that the build pipelineRun is signed", func() {
 				gomega.Eventually(func() error {
-					pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRun(component.GetName(), applicationName, userNamespace, headSHA)
+					pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRunWithType(
+						component.GetName(), applicationName, userNamespace, "build", headSHA, gitproviders.PaCEventTypePush(providerKind))
 					if err != nil {
 						return err
 					}
@@ -303,7 +374,8 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 			})
 
 			ginkgo.It("should validate that the build pipelineRun is annotated with the name of the Snapshot", func() {
-				pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRun(component.GetName(), applicationName, userNamespace, headSHA)
+				pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRunWithType(
+					component.GetName(), applicationName, userNamespace, "build", headSHA, gitproviders.PaCEventTypePush(providerKind))
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 				gomega.Expect(pipelineRun.Annotations["appstudio.openshift.io/snapshot"]).To(gomega.Equal(snapshot.GetName()))
 			})
@@ -404,4 +476,3 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 		})
 	})
 })
-
