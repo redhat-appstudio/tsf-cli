@@ -9,7 +9,7 @@ import (
 	buildcontrollers "github.com/konflux-ci/build-service/controllers"
 
 	"github.com/devfile/library/v2/pkg/util"
-	"github.com/google/go-github/v44/github"
+	"github.com/google/go-github/v66/github"
 	appservice "github.com/konflux-ci/application-api/api/v1alpha1"
 	"github.com/konflux-ci/e2e-tests/pkg/clients/has"
 	"github.com/konflux-ci/e2e-tests/pkg/constants"
@@ -41,7 +41,6 @@ const (
 	defaultPollingInterval  = time.Second * 2
 	snapshotPollingInterval = time.Second * 1
 	releasePollingInterval  = time.Second * 1
-
 )
 
 func tsfDemoSuiteDescribe(args ...interface{}) bool {
@@ -75,7 +74,7 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 	// Component configuration - using a simple test repository
 	var gitSourceUrl string
 	const (
-		gitSourceRevision          = "1255dc36534b9db7b99efbc281117435ea03255f"
+		gitSourceRevision          = "59b166dac1f5b9d94865781bc4e836db839bf65e"
 		gitSourceDefaultBranchName = "main"
 		dockerFilePath             = "Dockerfile"
 
@@ -279,7 +278,7 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 			ginkgo.It("should validate Tekton TaskRun test results successfully", func() {
 				pipelineRun, err = fw.AsKubeAdmin.HasController.GetComponentPipelineRun(component.GetName(), applicationName, userNamespace, headSHA)
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-				gomega.Expect(build.ValidateBuildPipelineTestResults(pipelineRun, fw.AsKubeAdmin.CommonController.KubeRest(), false)).To(gomega.Succeed())
+				gomega.Expect(build.ValidateBuildPipelineTestResults(pipelineRun, fw.AsKubeAdmin.CommonController.KubeRest(), false, true)).To(gomega.Succeed())
 			})
 
 			ginkgo.It("should validate that the build pipelineRun is signed", func() {
@@ -404,4 +403,3 @@ var _ = tsfDemoSuiteDescribe(ginkgo.Label(tsfTestLabel), func() {
 		})
 	})
 })
-
