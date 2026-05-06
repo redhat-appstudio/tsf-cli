@@ -1,21 +1,20 @@
-name: Build and publish docs
+name: Docs
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'docs/**'
-      - 'antora-playbook.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'docs/**'
       - 'antora-playbook.yml'
+  push:
+    tags:
+      - docs
+    branches:
+      - 'release-*'
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -24,7 +23,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tag:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if this is the latest release branch
+        id: check
+        run: |
+          CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
+          LATEST_BRANCH="release-$(git ls-remote --heads origin 'refs/heads/release-*' \
+            | sed 's|.*refs/heads/release-||' \
+            | sort -t. -k1,1n -k2,2n \
+            | tail -1)"
+          if [ "$CURRENT_BRANCH" = "$LATEST_BRANCH" ]; then
+            echo "Branch $CURRENT_BRANCH is the latest release branch."
+            echo "match=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Branch $CURRENT_BRANCH is not the latest release branch ($LATEST_BRANCH). Skipping."
+            echo "match=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.check.outputs.match == 'true'
+        uses: actions/checkout@v4
+
+      - name: Force-tag current commit as docs
+        if: steps.check.outputs.match == 'true'
+        run: |
+          git tag -f docs
+          git push origin docs --force
+
   build:
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/tags/docs')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,16 +72,17 @@ jobs:
         run: SITE_SEARCH_PROVIDER=lunr antora --fetch antora-playbook.yml
 
       - name: Disable Jekyll
+        if: github.ref == 'refs/tags/docs'
         run: touch build/site/.nojekyll
 
       - name: Upload artifact
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/tags/docs'
         uses: actions/upload-pages-artifact@v3
         with:
           path: build/site
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/tags/docs'
     needs: build
     runs-on: ubuntu-latest
     environment:
