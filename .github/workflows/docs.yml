@@ -31,15 +31,15 @@ jobs:
         id: check
         run: |
           CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
-          LATEST_BRANCH="${{ vars.DOCS_RELEASE_BRANCH }}"
-          if [ -z "$LATEST_BRANCH" ]; then
-            echo "DOCS_RELEASE_BRANCH variable is not set. Skipping."
-            echo "match=false" >> "$GITHUB_OUTPUT"
-          elif [ "$CURRENT_BRANCH" = "$LATEST_BRANCH" ]; then
-            echo "Branch $CURRENT_BRANCH matches DOCS_RELEASE_BRANCH."
+          LATEST_BRANCH="release-$(git ls-remote --heads origin 'refs/heads/release-*' \
+            | sed 's|.*refs/heads/release-||' \
+            | sort -t. -k1,1n -k2,2n \
+            | tail -1)"
+          if [ "$CURRENT_BRANCH" = "$LATEST_BRANCH" ]; then
+            echo "Branch $CURRENT_BRANCH is the latest release branch."
             echo "match=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Branch $CURRENT_BRANCH does not match DOCS_RELEASE_BRANCH ($LATEST_BRANCH). Skipping."
+            echo "Branch $CURRENT_BRANCH is not the latest release branch ($LATEST_BRANCH). Skipping."
             echo "match=false" >> "$GITHUB_OUTPUT"
           fi
 
