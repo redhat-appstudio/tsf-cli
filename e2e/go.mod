@@ -213,7 +213,7 @@ require (
 	k8s.io/cli-runtime v0.34.2 // indirect
 	k8s.io/client-go v11.0.0+incompatible // indirect
 	k8s.io/component-base v0.35.2 // indirect
-	k8s.io/klog v1.0.0 // indirect
+	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260127142750-a19766b6e2d4 // indirect
 	k8s.io/kubectl v0.34.0 // indirect
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
