@@ -110,8 +110,6 @@ Use `./setup-release.sh -h` for complete options.
 
 This script creates the necessary release plan, release policy, and release pipeline resources.
 
-TIP: A `create-tenant.sh` script is also available as a ConfigMap in the `konflux-cli` namespace. Download it the same way to create tenant namespaces with the required RBAC resources.
-
 == Trigger a release
 
 After you create a component and configure a release, releases happen automatically from push events.
@@ -155,16 +153,58 @@ gunzip cosign.gz
 chmod +x cosign
 ----
 +
-Download `cosign` from the {OCPShortName} cluster to your local machine. The `cosign` binary is not included in the installer container. For download and setup instructions, see link:https://docs.redhat.com/en/documentation/red_hat_trusted_artifact_signer/{RHTASVersion}/html-single/deployment_guide/index#signing-and-verifying-containers-by-using-cosign-from-the-command-line-interface-for-openshift_deploy[Signing and verifying containers by using Cosign from the command-line interface].
-+
-Verify the image signature:
+. View the metadata associated with the image:
 +
 [source,bash]
 ----
-./cosign tree <image-reference>
+IMAGE="<image-reference>"
+./cosign tree $IMAGE
 ----
+
+. Configure cosign to use the TUF server deployed on the cluster:
 +
-View the Rekor transparency log entry for the signing event.
+[source,bash,role="execute"]
+----
+TUF_HOST=$(oc get route -A -l "app.kubernetes.io/part-of=trusted-artifact-signer,app.kubernetes.io/component=tuf" -o jsonpath='{.items[0].spec.host}')
+curl -sSfL -o /tmp/root.json https://$TUF_HOST/root.json
+./cosign initialize \
+  --mirror=https://$TUF_HOST \
+  --root=/tmp/root.json
+----
+
+. View the signature details:
++
+[source,bash,role="execute"]
+----
+./cosign verify $IMAGE \
+  --certificate-identity-regexp '.*' \
+  --certificate-oidc-issuer-regexp '.*'
+----
+
+. View the attestation details:
++
+[source,bash,role="execute"]
+----
+REKOR_HOST=$(oc get route -A -l "app.kubernetes.io/part-of=trusted-artifact-signer,app.kubernetes.io/component=rekor-server" -o jsonpath='{.items[0].spec.host}')
+./cosign verify-attestation $IMAGE \
+  --certificate-identity-regexp '.*' \
+  --certificate-oidc-issuer-regexp '.*' \
+  --rekor-url="https://$REKOR_HOST" \
+  --type=slsaprovenance
+----
+
+. View the SBOM details:
++
+[source,bash,role="execute"]
+----
+REKOR_HOST=$(oc get route -A -l "app.kubernetes.io/part-of=trusted-artifact-signer,app.kubernetes.io/component=rekor-server" -o jsonpath='{.items[0].spec.host}')
+./cosign verify-attestation $IMAGE \
+  --certificate-identity-regexp '.*' \
+  --certificate-oidc-issuer-regexp '.*' \
+  --type=spdxjson
+----
+
+. View the Rekor transparency log entry for the signing event.
 
 == Next steps
 
