@@ -31,10 +31,11 @@ jobs:
         id: check
         run: |
           CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
-          LATEST_BRANCH="release-$(git ls-remote --heads origin 'refs/heads/release-*' \
+          LATEST_BRANCH="release-$(git ls-remote --heads https://github.com/${GITHUB_REPOSITORY}.git 'refs/heads/release-*' \
             | sed 's|.*refs/heads/release-||' \
             | sort -t. -k1,1n -k2,2n \
             | tail -1)"
+       
           if [ "$CURRENT_BRANCH" = "$LATEST_BRANCH" ]; then
             echo "Branch $CURRENT_BRANCH is the latest release branch."
             echo "match=true" >> "$GITHUB_OUTPUT"
