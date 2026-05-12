@@ -150,8 +150,8 @@ require (
 	github.com/opencontainers/runc v1.1.14 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/openshift-pipelines/pipelines-as-code v0.34.0 // indirect
-	github.com/openshift/api v0.0.0-20260318185450-1f2fa3f09f4e // indirect
-	github.com/openshift/client-go v0.0.0-20260320040014-4b5fc2cdad98 // indirect
+	github.com/openshift/api v0.0.0-20260511191110-9b69e5fa27e9 // indirect
+	github.com/openshift/client-go v0.0.0-20260512113608-deb4dc54551a // indirect
 	github.com/openshift/library-go v0.0.0-20220525173854-9b950a41acdc // indirect
 	github.com/openshift/oc v0.0.0-alpha.0.0.20220614012638-35c7eeb5274e // indirect
 	github.com/operator-framework/operator-lib v0.19.0 // indirect
