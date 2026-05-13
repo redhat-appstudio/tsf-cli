@@ -1,7 +1,6 @@
 name: tsf
 title: Trusted Software Factory
-version: ~
-display_version: '0.1'
+version: '0.1'
 nav:
   - modules/ROOT/nav.adoc
 

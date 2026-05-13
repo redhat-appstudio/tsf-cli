@@ -1,6 +1,8 @@
 site:
   title: Trusted Software Factory Documentation
   start_page: tsf::index.adoc
+urls:
+  latest_version_segment: ''
 
 content:
   sources:
