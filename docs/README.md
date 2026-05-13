@@ -8,8 +8,8 @@ This directory contains the [Antora](https://antora.org/)-based documentation fo
 
 | Branch | Purpose |
 |--------|---------|
-| `main` | Development branch. All new doc work starts here. |
-| `release-X.Y` | Release branches (e.g., `release-0.1`). The **latest** release branch is the source for the published site. |
+| `main` | Development branch. All new doc work starts here. PRs to `main` validate the build but do not publish. |
+| `release-X.Y` | Release branches (e.g., `release-0.1`). The **latest** release branch is the source for the published site. Docs are built and deployed directly from this branch — there is no separate `docs` branch or tag involved. |
 
 ## Contributing documentation changes
 
@@ -21,7 +21,7 @@ This directory contains the [Antora](https://antora.org/)-based documentation fo
    ```
 2. Edit files under `docs/modules/ROOT/pages/`.
 3. Build locally to verify (see [Local build](#local-build) below).
-4. Open a PR against `main`. CI validates the Antora build.
+4. Open a PR against `main`. CI runs the `validate` job to check the Antora build.
 5. Merge the PR.
 
 Merging to `main` does **not** update the live site.
@@ -39,49 +39,81 @@ git push upstream release-0.1
 
 Or open a separate PR targeting the release branch directly.
 
-Once the push lands on the latest release branch, the live site updates automatically within a few minutes.
+Once the push lands on the latest release branch, CI automatically builds and deploys the site. The live site updates within a few minutes.
 
-### When a new release is cut
+## Cutting a new release
 
-When a new release branch is created (e.g., `release-0.2`):
+When creating a new release branch (e.g., `release-0.2`):
 
-- The new branch automatically becomes the publishing source.
-- Pushes to older release branches (e.g., `release-0.1`) stop publishing.
-- No configuration or variable updates are needed.
+1. **Create the branch** from `main` as usual.
+2. **Update `display_version`** in `docs/antora.yml` on the new release branch:
+   ```yaml
+   display_version: '0.2'
+   ```
+   This controls the version number shown in the toolbar next to "Edit this Page".
+3. **No CI or GitHub settings changes are needed.** The workflow automatically detects the latest `release-*` branch by semver sort. Once `release-0.2` exists, it becomes the publishing source and pushes to `release-0.1` stop publishing.
 
 ## How publishing works
 
-Publishing is fully automated via GitHub Actions (`.github/workflows/docs.yml`). The workflow has four jobs:
+Publishing is fully automated via GitHub Actions (`.github/workflows/docs.yml`). The docs source is built directly from the release branch that triggered the workflow — no intermediate branch or tag is involved.
 
-### 1. `check` job (runs on push to any `release-*` branch)
+### Workflow triggers
 
-- Queries all remote `release-*` branches using `git ls-remote`.
-- Sorts them by semver to find the latest (e.g., `release-0.2` > `release-0.1`).
-- Outputs `is-latest=true` if the pushed branch is the latest, `false` otherwise.
+The workflow runs on two events:
+- **Pull request to `main`** (only if files in `docs/` or `antora-playbook.yml` changed) — validates the build.
+- **Push to any `release-*` branch** — checks if this is the latest release, and if so, builds and deploys.
 
-### 2. `validate` job (runs on PRs to `main`)
+### Jobs
 
+There are four jobs. On a push to a release branch, they run in sequence: `check` → `build` → `deploy`. On a PR to `main`, only `validate` runs.
+
+#### 1. `check` (push to `release-*` only)
+
+Determines whether the pushed branch is the latest release branch.
+
+- Runs `git ls-remote` to list all `release-*` branches on the remote.
+- Sorts them by semver (e.g., `release-0.2` > `release-0.1`).
+- Writes the result to `$GITHUB_OUTPUT` so downstream jobs can read it.
+- Sets `is-latest=true` if the pushed branch matches, `false` otherwise.
+
+**How the gating works:** The `check` job declares an `outputs` section that exposes `is-latest`. The `build` job has `needs: check` and an `if` condition that reads `needs.check.outputs.is-latest == 'true'`. If the check says `false`, `build` is skipped, and since `deploy` depends on `build`, it is also skipped. This is standard GitHub Actions job chaining — one job writes to `$GITHUB_OUTPUT`, the next reads it via `needs.<job>.outputs.<name>`.
+
+#### 2. `validate` (PRs to `main` only)
+
+- Checks out the PR branch.
 - Builds the site with Antora to verify the docs compile without errors.
-- Does **not** deploy. This is a build-only check.
+- Does **not** upload artifacts or deploy. This is a build-only check.
 
-### 3. `build` job (runs after `check`, only if `is-latest` is `true`)
+#### 3. `build` (after `check`, only if `is-latest` is `true`)
 
-- Checks out the release branch.
+- Checks out the release branch (the same branch that triggered the workflow).
 - Installs Antora 3.1 and the Lunr search extension.
-- Runs `antora --fetch antora-playbook.yml` to build the site.
-- Creates a `.nojekyll` file (required for GitHub Pages to serve Antora assets).
+- Runs `antora --fetch antora-playbook.yml` to build the site from the docs source on this branch.
+- Creates a `.nojekyll` file (required for GitHub Pages to serve Antora's `_/`-prefixed asset directories).
 - Uploads the build output as a GitHub Pages artifact.
 
-### 4. `deploy` job (runs after `build` succeeds)
+**Key point:** The build uses the docs content from the release branch itself. There is no separate `docs` branch or `docs` tag. Whatever is on the release branch at the time of the push is what gets published.
 
-- Deploys the artifact to GitHub Pages.
+#### 4. `deploy` (after `build` succeeds)
+
+- Deploys the Pages artifact to the `github-pages` environment.
+- The live site updates at https://redhat-appstudio.github.io/tsf-cli/.
+
+### Flow diagram
 
 ```
-PR to main ──> validate (build-only check, no deploy)
+PR to main ──> validate (build-only, no deploy)
 
-Push to release-* ──> check ──> is this the latest? ──yes──> build ──> deploy
+Push to release-* ──> check ──> is this the latest? ──yes──> build (from release branch) ──> deploy
                                                       ──no──> skip (all remaining jobs skipped)
 ```
+
+### GitHub Pages configuration
+
+These settings are in the GitHub repo settings and do not need to change per release:
+
+- **Source** (Settings → Pages): GitHub Actions (not "Deploy from a branch").
+- **Deployment branches** (Settings → Environments → github-pages): `release-*` must be an allowed branch pattern.
 
 ## Local build
 
@@ -121,6 +153,7 @@ docs/
         ├── header-content.hbs         #   Navbar with Home link, Raise Issue, search
         ├── head-styles.hbs            #   CSS includes (site.css + main.css)
         ├── footer-content.hbs         #   Footer with GitHub and issue links
+        ├── toolbar.hbs                #   Version display + Edit this Page link
         └── pagination.hbs            #   Prev/next page navigation
 
 antora-playbook.yml                    # Antora playbook (lives at repo root, not in docs/)
@@ -136,7 +169,7 @@ Product-specific attributes are defined in `antora.yml` and available in all pag
 | `{TSFName}` | Trusted Software Factory | Full product name |
 | `{TSFShortName}` | TSF | Short product name |
 | `{TSFCli}` | tsf | CLI tool name |
-| `{TSFInstallerImage}` | quay.io/redhat-ads/tsf-cli:unstable | Installer container image |
+| `{TSFInstallerImage}` | quay.io/redhat-ads/tsf-cli:latest | Installer container image |
 | `{OCPName}` | OpenShift Container Platform | Full OCP name |
 | `{OCPShortName}` | OCP | Short OCP name |
 | `{OCPVersion}` | 4.20 | Target OCP version |
