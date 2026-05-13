@@ -8,8 +8,6 @@ on:
       - 'docs/**'
       - 'antora-playbook.yml'
   push:
-    tags:
-      - docs
     branches:
       - 'release-*'
 
@@ -23,9 +21,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag:
+  check:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release-')
     runs-on: ubuntu-latest
+    outputs:
+      is-latest: ${{ steps.check.outputs.match }}
     steps:
       - name: Check if this is the latest release branch
         id: check
@@ -35,7 +35,7 @@ jobs:
             | sed 's|.*refs/heads/release-||' \
             | sort -t. -k1,1n -k2,2n \
             | tail -1)"
-       
+
           if [ "$CURRENT_BRANCH" = "$LATEST_BRANCH" ]; then
             echo "Branch $CURRENT_BRANCH is the latest release branch."
             echo "match=true" >> "$GITHUB_OUTPUT"
@@ -44,18 +44,27 @@ jobs:
             echo "match=false" >> "$GITHUB_OUTPUT"
           fi
 
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout
-        if: steps.check.outputs.match == 'true'
         uses: actions/checkout@v4
 
-      - name: Force-tag current commit as docs
-        if: steps.check.outputs.match == 'true'
-        run: |
-          git tag -f docs
-          git push origin docs --force
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Antora and extensions
+        run: npm i -g @antora/cli@3.1 @antora/site-generator@3.1 @antora/lunr-extension@1.0.0-alpha.13
+
+      - name: Build site
+        run: SITE_SEARCH_PROVIDER=lunr antora --fetch antora-playbook.yml
 
   build:
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/tags/docs')
+    if: needs.check.outputs.is-latest == 'true'
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -73,17 +82,14 @@ jobs:
         run: SITE_SEARCH_PROVIDER=lunr antora --fetch antora-playbook.yml
 
       - name: Disable Jekyll
-        if: github.ref == 'refs/tags/docs'
         run: touch build/site/.nojekyll
 
       - name: Upload artifact
-        if: github.ref == 'refs/tags/docs'
         uses: actions/upload-pages-artifact@v3
         with:
           path: build/site
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/tags/docs'
     needs: build
     runs-on: ubuntu-latest
     environment:
