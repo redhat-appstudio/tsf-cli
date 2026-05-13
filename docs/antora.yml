@@ -1,6 +1,7 @@
 name: tsf
 title: Trusted Software Factory
 version: ~
+display_version: '0.1'
 nav:
   - modules/ROOT/nav.adoc
 
@@ -26,3 +27,4 @@ asciidoc:
     RHTASName: 'Red Hat Trusted Artifact Signer'
     RHTASVersion: '1.4'
     RHTPAName: 'Red Hat Trusted Profile Analyzer'
+    TSFVersion: '0.1'
