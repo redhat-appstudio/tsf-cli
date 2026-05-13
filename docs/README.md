@@ -11,8 +11,6 @@ This directory contains the [Antora](https://antora.org/)-based documentation fo
 | `main` | Development branch. All new doc work starts here. |
 | `release-X.Y` | Release branches (e.g., `release-0.1`). The **latest** release branch is the source for the published site. |
 
-The `docs` **tag** (not a branch) is managed automatically by CI. Do not create or move it manually.
-
 ## Contributing documentation changes
 
 ### Day-to-day workflow
@@ -53,34 +51,36 @@ When a new release branch is created (e.g., `release-0.2`):
 
 ## How publishing works
 
-Publishing is fully automated via GitHub Actions (`.github/workflows/docs.yml`). There are three jobs:
+Publishing is fully automated via GitHub Actions (`.github/workflows/docs.yml`). The workflow has four jobs:
 
-### 1. `tag` job (runs on push to any `release-*` branch)
+### 1. `check` job (runs on push to any `release-*` branch)
 
-- Queries all remote `release-*` branches.
+- Queries all remote `release-*` branches using `git ls-remote`.
 - Sorts them by semver to find the latest (e.g., `release-0.2` > `release-0.1`).
-- If the pushed branch **is** the latest: force-tags the commit as `docs` and pushes the tag.
-- If the pushed branch is **not** the latest: skips silently.
+- Outputs `is-latest=true` if the pushed branch is the latest, `false` otherwise.
 
-### 2. `build` job (runs on `docs` tag push or PR to `main`)
+### 2. `validate` job (runs on PRs to `main`)
 
-- Checks out the tagged commit.
+- Builds the site with Antora to verify the docs compile without errors.
+- Does **not** deploy. This is a build-only check.
+
+### 3. `build` job (runs after `check`, only if `is-latest` is `true`)
+
+- Checks out the release branch.
 - Installs Antora 3.1 and the Lunr search extension.
 - Runs `antora --fetch antora-playbook.yml` to build the site.
+- Creates a `.nojekyll` file (required for GitHub Pages to serve Antora assets).
 - Uploads the build output as a GitHub Pages artifact.
-- On PRs to `main`, it only validates the build (no artifact upload, no deploy).
 
-### 3. `deploy` job (runs on `docs` tag push, after `build` succeeds)
+### 4. `deploy` job (runs after `build` succeeds)
 
 - Deploys the artifact to GitHub Pages.
 
 ```
-PR to main ──> build (validate only, no deploy)
+PR to main ──> validate (build-only check, no deploy)
 
-Push to release-* ──> tag job ──> is this the latest? ──yes──> force-tag as `docs`
-                                                        ──no──> skip
-
-docs tag push ──> build ──> deploy to GitHub Pages
+Push to release-* ──> check ──> is this the latest? ──yes──> build ──> deploy
+                                                      ──no──> skip (all remaining jobs skipped)
 ```
 
 ## Local build
