@@ -11,7 +11,7 @@ require (
 	github.com/konflux-ci/integration-service v0.0.0-20260327093127-2b0e36d45a91
 	github.com/konflux-ci/release-service v0.0.0-20260127184035-c36c56a3c440
 	github.com/onsi/ginkgo/v2 v2.28.0
-	github.com/onsi/gomega v1.39.1
+	github.com/onsi/gomega v1.41.0
 	github.com/tektoncd/pipeline v1.9.2
 	k8s.io/klog/v2 v2.130.1
 )
