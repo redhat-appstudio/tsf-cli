@@ -1,0 +1,101 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: konflux-ui-e2e-run
+  annotations:
+    tekton.dev/displayName: "Run Konflux UI E2E Tests"
+    tekton.dev/categories: "Testing"
+    tekton.dev/tags: "e2e,konflux-ui,cypress"
+spec:
+  description: >-
+    Runs the Konflux UI Cypress end-to-end tests against a cluster
+    with TSF installed. Uses a pre-built test image with Chrome,
+    Node.js, Yarn, and Cypress already installed.
+  params:
+    - name: ocp-login-command
+      type: string
+      description: "Command to log in to the OpenShift cluster."
+    - name: konflux-ui-tests-image
+      type: string
+      description: "Pre-built image containing the Konflux UI e2e tests."
+      default: "quay.io/konflux_ui_qe/konflux-ui-tests:latest"
+    - name: pipeline
+      type: string
+      description: "Konflux pipeline to use for component builds in tests."
+      default: "docker-build-oci-ta-min"
+  volumes:
+    - name: tsf-cli-install
+      secret:
+        secretName: tsf-cli-install
+  steps:
+    - name: run-ui-e2e-tests
+      image: $(params.konflux-ui-tests-image)
+      env:
+        - name: OCP_LOGIN_COMMAND
+          value: "$(params.ocp-login-command)"
+        - name: PIPELINE
+          value: "$(params.pipeline)"
+      computeResources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          memory: 8Gi
+      volumeMounts:
+        - name: tsf-cli-install
+          mountPath: /usr/local/tsf-cli-install
+      script: |
+        #!/usr/bin/env bash
+        set -o errexit
+        set -o nounset
+        set -o pipefail
+
+        # ── Install oc CLI ──
+        mkdir -p "${HOME}/bin"
+        curl -sSfL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz \
+          | tar xz -C "${HOME}/bin" oc
+        export PATH="${HOME}/bin:${PATH}"
+
+        # Disable in-cluster config so oc uses the kubeconfig from login.
+        unset KUBERNETES_SERVICE_HOST KUBERNETES_SERVICE_PORT
+
+        # ── Authenticate to cluster ──
+        eval "${OCP_LOGIN_COMMAND}"
+
+        # ── Parse USERNAME and PASSWORD from ocp-login-command ──
+        OCP_USERNAME=$(echo "${OCP_LOGIN_COMMAND}" | grep -oP '(--username|-u)\s+\K\S+')
+        OCP_PASSWORD=$(echo "${OCP_LOGIN_COMMAND}" | grep -oP '(--password|-p)\s+\K\S+')
+
+        # ── Discover Konflux UI route ──
+        KONFLUX_UI_HOST=$(oc get route -n konflux-ui -o jsonpath='{.items[0].spec.host}')
+        if [[ -z "${KONFLUX_UI_HOST}" ]]; then
+          echo "ERROR: could not discover Konflux UI route in namespace konflux-ui"
+          exit 1
+        fi
+        KONFLUX_BASE_URL="https://${KONFLUX_UI_HOST}"
+        echo "Discovered Konflux UI at: ${KONFLUX_BASE_URL}"
+
+        # ── Export Cypress environment variables ──
+        export CYPRESS_KONFLUX_BASE_URL="${KONFLUX_BASE_URL}"
+        export CYPRESS_LOGIN_PROVIDER="openshift"
+        export CYPRESS_USERNAME="${OCP_USERNAME}"
+        export CYPRESS_PASSWORD="${OCP_PASSWORD}"
+        export CYPRESS_GH_TOKEN="$(cat /usr/local/tsf-cli-install/github-token)"
+        export CYPRESS_GH_REPO_OWNER="$(cat /usr/local/tsf-cli-install/github-org)"
+        export CYPRESS_HAC_NAMESPACE="default-tenant"
+        export CYPRESS_PIPELINE="${PIPELINE}"
+        export CYPRESS_SOURCE_REPO_OWNER="konflux-ci"
+        export CYPRESS_SOURCE_REPO_NAME="testrepo"
+
+        # ── Grant Konflux admin role to the test user ──
+        oc create rolebinding test-konflux-admin \
+          --clusterrole=konflux-admin-user-actions \
+          --user="${OCP_USERNAME}" \
+          -n "${CYPRESS_HAC_NAMESPACE}" 2>/dev/null || true
+
+        # ── Run the UI tests ──
+        # The image has tests pre-installed at /tmp/e2e
+        cd /tmp/e2e
+        echo "Starting Cypress UI tests against ${KONFLUX_BASE_URL}"
+        yarn cypress run -b chrome --spec 'tests/basic-happy-path.spec.ts'
