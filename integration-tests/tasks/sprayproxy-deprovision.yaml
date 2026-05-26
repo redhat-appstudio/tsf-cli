@@ -1,0 +1,85 @@
+# Forked from: https://github.com/konflux-ci/tekton-integration-catalog
+# Upstream path: tasks/sprayproxy/sprayproxy-deprovision/0.1/sprayproxy-deprovision.yaml
+# Reason: Read ocp-login-command from a shared workspace instead of a param
+#          so this finally task is not skipped when provision times out.
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: sprayproxy-unregister-server
+  labels:
+    app.kubernetes.io/version: "0.1"
+    upstream-usable: "false"
+  annotations:
+    tekton.dev/pipelines.minVersion: 0.12.1
+    tekton.dev/tags: konflux
+spec:
+  description: |
+    The `sprayproxy-unregister-server` Task is designed to unregister Pipelines as Code (PAC) servers from the SprayProxy server.
+    It retrieves the list of currently registered PAC servers, checks their availability, and removes any unreachable PAC servers
+    from the SprayProxy backend. The task ensures that the server is unregistered cleanly and retries the operation if necessary.
+  params:
+    - name: ocp-login-command
+      type: string
+      description: The OpenShift login command used to authenticate to the cluster.
+      default: ""
+  workspaces:
+    - name: shared-data
+      optional: true
+      description: Shared workspace for reading login command written by the provision task.
+  steps:
+    - name: provision
+      image: quay.io/konflux-qe-incubator/konflux-qe-tools:latest
+      env:
+        - name: SPRAYPROXY_SERVER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: "sprayproxy-auth"
+              key: "server-token"
+        - name: SPRAYPROXY_SERVER_URL
+          valueFrom:
+            secretKeyRef:
+              name: "sprayproxy-auth"
+              key: "server-url"
+      script: |
+        #!/usr/bin/env bash
+        set -o errexit
+        set -o nounset
+        set -o pipefail
+
+        LOGIN_CMD="$(params.ocp-login-command)"
+        if [ -z "${LOGIN_CMD}" ] && [ "$(workspaces.shared-data.bound)" = "true" ] && [ -f "$(workspaces.shared-data.path)/ocp-login-command" ]; then
+          LOGIN_CMD="$(cat "$(workspaces.shared-data.path)/ocp-login-command")"
+        fi
+        if [ -z "${LOGIN_CMD}" ]; then
+          echo "ERROR: No ocp-login-command available, cannot unregister from sprayproxy"
+          exit 1
+        fi
+
+        echo -e "INFO: Login to ephemeral cluster..."
+        eval "${LOGIN_CMD}"
+
+        export WEBHOOK_URL=https://"$(oc get route pipelines-as-code-controller -n openshift-pipelines -o jsonpath='{.spec.host}')"
+
+        unregister_pac_server(){
+          echo "Unregistering PAC server [$WEBHOOK_URL] from SprayProxy server"
+          for _ in {1..5}; do
+            if curl -k -X DELETE -H "Authorization: Bearer ${SPRAYPROXY_SERVER_TOKEN}" "${SPRAYPROXY_SERVER_URL}"/backends --data '{"url": "'"$WEBHOOK_URL"'"}'; then
+              break
+            fi
+            sleep 5
+          done
+        }
+
+        list_pac_servers(){
+          echo "List PAC server from SprayProxy servers"
+          for _ in {1..5}; do
+            if curl -k -X GET -H "Authorization: Bearer ${SPRAYPROXY_SERVER_TOKEN}" "${SPRAYPROXY_SERVER_URL}"/backends; then
+              break
+            fi
+            sleep 5
+          done
+        }
+
+        unregister_pac_server
+        list_pac_servers
