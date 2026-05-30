@@ -446,7 +446,7 @@ spec:
           - mountPath: /var/workdir
             name: workdir
         - name: govulncheck
-          image: registry.access.redhat.com/ubi10/go-toolset:1.25.8
+          image: registry.access.redhat.com/ubi10/go-toolset:1.26.2-1779974565
           workingDir: /var/workdir/source
           script: |
             #!/usr/bin/env bash

@@ -3,7 +3,7 @@
 #
 
 FROM registry.redhat.io/openshift4/ose-tools-rhel9:v4.20.0-202602040619.p2.g040daf8.assembly.stream.el9 AS ose-tools
-FROM registry.access.redhat.com/ubi10/go-toolset:1.25.8-1774618351 AS builder
+FROM registry.access.redhat.com/ubi10/go-toolset:1.26.2-1779974565 AS builder
 
 ARG COMMIT_ID
 ARG VERSION_ID
