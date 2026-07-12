@@ -53,7 +53,7 @@ require (
 	github.com/containers/libtrust v0.0.0-20230121012942-c1716e8a8d01 // indirect
 	github.com/containers/ocicrypt v1.1.10 // indirect
 	github.com/containers/storage v1.51.0 // indirect
-	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
+	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/davidmz/go-pageant v1.0.2 // indirect
 	github.com/docker/cli v29.2.0+incompatible // indirect
@@ -271,7 +271,7 @@ replace (
 	vbom.ml/util => github.com/fvbommel/util v0.0.0-20180919145318-efcd4e0f9787
 )
 
-replace github.com/cyphar/filepath-securejoin => github.com/cyphar/filepath-securejoin v0.3.6
+replace github.com/cyphar/filepath-securejoin => github.com/cyphar/filepath-securejoin v0.7.0
 
 replace github.com/expr-lang/expr => github.com/expr-lang/expr v1.17.7
 
